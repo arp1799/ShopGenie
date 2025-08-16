@@ -126,6 +126,16 @@ Only return valid JSON.`
       };
     }
 
+    // Check if message looks like an address (contains common address keywords)
+    if (this.looksLikeAddress(message)) {
+      return {
+        intent: 'order',
+        items: [],
+        address: message.trim(),
+        confidence: 0.8
+      };
+    }
+
     return {
       intent: 'unknown',
       confidence: 0.3
@@ -209,6 +219,37 @@ Only return valid JSON.`
     }
 
     return null;
+  }
+
+  /**
+   * Check if a message looks like an address
+   * @param {string} message - Message to check
+   * @returns {boolean} - True if message looks like an address
+   */
+  looksLikeAddress(message) {
+    const lowerMessage = message.toLowerCase();
+    
+    // Common address keywords
+    const addressKeywords = [
+      'layout', 'sector', 'block', 'floor', 'apartment', 'flat', 'house', 'building',
+      'street', 'road', 'avenue', 'lane', 'colony', 'nagar', 'vihar', 'puram',
+      'bangalore', 'mumbai', 'delhi', 'chennai', 'kolkata', 'pune', 'hyderabad',
+      'ahmedabad', 'jaipur', 'lucknow', 'kanpur', 'nagpur', 'indore', 'thane',
+      'bhopal', 'visakhapatnam', 'patna', 'vadodara', 'ghaziabad', 'ludhiana',
+      'agra', 'nashik', 'faridabad', 'meerut', 'rajkot', 'kalyan', 'vasai',
+      'vijayawada', 'jodhpur', 'madurai', 'raipur', 'kota', 'chandigarh'
+    ];
+
+    // Check for pincode pattern (6 digits)
+    const hasPincode = /\d{6}/.test(message);
+    
+    // Check for address keywords
+    const hasAddressKeywords = addressKeywords.some(keyword => lowerMessage.includes(keyword));
+    
+    // Check for common address patterns (number + text)
+    const hasAddressPattern = /^[A-Z0-9\-\/,\s]+$/i.test(message.trim()) && message.length > 10;
+    
+    return hasPincode || hasAddressKeywords || hasAddressPattern;
   }
 
   /**
