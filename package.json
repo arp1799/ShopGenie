@@ -19,7 +19,6 @@
   "author": "ShopGenie Team",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.60.0",
     "axios": "^1.6.2",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",

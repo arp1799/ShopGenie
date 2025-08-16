@@ -1,15 +1,9 @@
 const OpenAI = require('openai');
-const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
 
 // Initialize OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-});
-
-// Initialize Anthropic client
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
 class AIService {
@@ -48,19 +42,19 @@ class AIService {
       }
     }
 
-    // Try Anthropic Claude if OpenAI fails
+    // Try free Hugging Face model if OpenAI fails
     try {
-      console.log(`🤖 Trying Anthropic Claude`);
-      const result = await this.parseWithClaude(message);
-      console.log(`✅ Parsed with Claude: ${result.intent}`);
+      console.log(`🤖 Trying free Hugging Face model`);
+      const result = await this.parseWithHuggingFace(message);
+      console.log(`✅ Parsed with Hugging Face: ${result.intent}`);
       return result;
     } catch (error) {
-      console.error(`❌ Failed with Claude:`, error.message);
+      console.error(`❌ Failed with Hugging Face:`, error.message);
     }
 
-    // Final fallback to regex parser
-    console.log(`🔄 Falling back to regex parser`);
-    return this.fallbackParse(message);
+    // Final fallback to enhanced regex parser
+    console.log(`🔄 Falling back to enhanced regex parser`);
+    return this.enhancedFallbackParse(message);
   }
 
   /**
@@ -117,72 +111,83 @@ Only return valid JSON.`
   }
 
   /**
-   * Parse message with Anthropic Claude
+   * Parse message with free Hugging Face model
    * @param {string} message - User's message
    * @returns {Promise<Object>} - Parsed intent and data
    */
-  async parseWithClaude(message) {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      throw new Error('Anthropic API key not configured');
-    }
-
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 500,
-      messages: [
-        {
-          role: 'user',
-          content: `You are ShopGenie AI, a WhatsApp shopping assistant. Parse this user message to extract shopping intent, items, quantities, and delivery address.
-
-Parse the message and return a JSON object with the following structure:
-{
-  "intent": "order|add_item|remove_item|address_confirmation|retailer_selection|help|unknown",
-  "items": [
-    {
-      "name": "item name",
-      "quantity": "quantity value",
-      "unit": "unit (kg, L, pc, etc.)",
-      "brand": "brand name (optional)"
-    }
-  ],
-  "address": "full address text if provided",
-  "confirmed": true/false (for address confirmation),
-  "choices": {} (for retailer selection),
-  "confidence": 0.0-1.0
-}
-
-User message: ${message}
-
-Only return valid JSON.`
-        }
-      ]
+  async parseWithHuggingFace(message) {
+    // Using a free text classification model for intent detection
+    const response = await axios.post('https://api-inference.huggingface.co/models/facebook/bart-large-mnli', {
+      inputs: message,
+      parameters: {
+        candidate_labels: [
+          "order groceries",
+          "add item to cart", 
+          "remove item from cart",
+          "confirm address",
+          "select retailer",
+          "ask for help",
+          "unknown request"
+        ]
+      }
+    }, {
+      headers: {
+        'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY || 'hf_demo'}`,
+        'Content-Type': 'application/json'
+      }
     });
 
-    const content = response.content[0].text;
-    const parsedData = JSON.parse(content);
-    return parsedData;
+    const intent = this.mapHuggingFaceIntent(response.data.labels[0]);
+    const items = this.extractItemsFromText(message);
+    const address = this.extractAddressFromText(message);
+
+    return {
+      intent: intent,
+      items: items,
+      address: address,
+      confidence: response.data.scores[0]
+    };
   }
 
   /**
-   * Fallback parsing using regex patterns
+   * Map Hugging Face intent to our intent format
+   * @param {string} huggingFaceIntent - Intent from Hugging Face
+   * @returns {string} - Mapped intent
+   */
+  mapHuggingFaceIntent(huggingFaceIntent) {
+    const intentMap = {
+      'order groceries': 'order',
+      'add item to cart': 'add_item',
+      'remove item from cart': 'remove_item',
+      'confirm address': 'address_confirmation',
+      'select retailer': 'retailer_selection',
+      'ask for help': 'help',
+      'unknown request': 'unknown'
+    };
+    return intentMap[huggingFaceIntent] || 'unknown';
+  }
+
+  /**
+   * Enhanced fallback parser with better pattern matching
    * @param {string} message - User's message
    * @returns {Object} - Parsed data
    */
-  fallbackParse(message) {
+  enhancedFallbackParse(message) {
     const lowerMessage = message.toLowerCase();
     
-    // Check for order intent
-    if (lowerMessage.includes('order') || lowerMessage.includes('buy') || lowerMessage.includes('get')) {
+    // Check for order intent with better patterns
+    if (lowerMessage.includes('order') || lowerMessage.includes('buy') || lowerMessage.includes('get') || 
+        lowerMessage.includes('want') || lowerMessage.includes('need')) {
       return {
         intent: 'order',
         items: this.extractItemsFromText(message),
         address: this.extractAddressFromText(message),
-        confidence: 0.7
+        confidence: 0.8
       };
     }
 
     // Check for add item intent
-    if (lowerMessage.includes('add') || lowerMessage.includes('include')) {
+    if (lowerMessage.includes('add') || lowerMessage.includes('include') || lowerMessage.includes('more')) {
       return {
         intent: 'add_item',
         items: this.extractItemsFromText(message),
@@ -191,7 +196,8 @@ Only return valid JSON.`
     }
 
     // Check for address confirmation
-    if (lowerMessage.includes('yes') || lowerMessage.includes('correct') || lowerMessage.includes('✅')) {
+    if (lowerMessage.includes('yes') || lowerMessage.includes('correct') || lowerMessage.includes('✅') || 
+        lowerMessage.includes('right') || lowerMessage.includes('okay') || lowerMessage.includes('ok')) {
       return {
         intent: 'address_confirmation',
         confirmed: true,
@@ -199,7 +205,8 @@ Only return valid JSON.`
       };
     }
 
-    if (lowerMessage.includes('no') || lowerMessage.includes('wrong') || lowerMessage.includes('❌')) {
+    if (lowerMessage.includes('no') || lowerMessage.includes('wrong') || lowerMessage.includes('❌') || 
+        lowerMessage.includes('incorrect') || lowerMessage.includes('not')) {
       return {
         intent: 'address_confirmation',
         confirmed: false,
@@ -208,19 +215,30 @@ Only return valid JSON.`
     }
 
     // Check for help
-    if (lowerMessage.includes('help') || lowerMessage.includes('start')) {
+    if (lowerMessage.includes('help') || lowerMessage.includes('start') || lowerMessage.includes('hi') || 
+        lowerMessage.includes('hello') || lowerMessage.includes('what can you do')) {
       return {
         intent: 'help',
         confidence: 0.9
       };
     }
 
-    // Check if message looks like an address (contains common address keywords)
+    // Check if message looks like an address (enhanced detection)
     if (this.looksLikeAddress(message)) {
       return {
         intent: 'order',
         items: [],
         address: message.trim(),
+        confidence: 0.9
+      };
+    }
+
+    // Check for retailer selection
+    if (lowerMessage.includes('zepto') || lowerMessage.includes('blinkit') || lowerMessage.includes('swiggy') || 
+        lowerMessage.includes('instamart') || lowerMessage.includes('bigbasket')) {
+      return {
+        intent: 'retailer_selection',
+        choices: this.extractRetailerChoices(message),
         confidence: 0.8
       };
     }
@@ -229,6 +247,36 @@ Only return valid JSON.`
       intent: 'unknown',
       confidence: 0.3
     };
+  }
+
+  /**
+   * Extract retailer choices from message
+   * @param {string} message - User's message
+   * @returns {Object} - Retailer choices
+   */
+  extractRetailerChoices(message) {
+    const choices = {};
+    const lowerMessage = message.toLowerCase();
+    
+    // Extract retailer-item pairs
+    const retailers = ['zepto', 'blinkit', 'swiggy', 'instamart', 'bigbasket'];
+    const items = this.extractItemsFromText(message);
+    
+    retailers.forEach(retailer => {
+      if (lowerMessage.includes(retailer)) {
+        // Find items mentioned near this retailer
+        const retailerIndex = lowerMessage.indexOf(retailer);
+        const nearbyText = lowerMessage.substring(Math.max(0, retailerIndex - 50), retailerIndex + 50);
+        
+        items.forEach(item => {
+          if (nearbyText.includes(item.name)) {
+            choices[item.name] = retailer.charAt(0).toUpperCase() + retailer.slice(1);
+          }
+        });
+      }
+    });
+    
+    return choices;
   }
 
   /**
