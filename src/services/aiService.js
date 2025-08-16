@@ -1,4 +1,5 @@
 const OpenAI = require('openai');
+const Anthropic = require('@anthropic-ai/sdk');
 const axios = require('axios');
 
 // Initialize OpenAI client
@@ -6,9 +7,19 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Initialize Anthropic client
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
 class AIService {
   constructor() {
-    this.model = 'gpt-4o-mini'; // Using the most cost-effective model
+    this.models = [
+      'gpt-4o-mini',      // Primary model (fastest, cheapest)
+      'gpt-3.5-turbo',    // Fallback model 1
+      'gpt-4o'            // Fallback model 2 (if available)
+    ];
+    this.currentModelIndex = 0;
   }
 
   /**
@@ -17,15 +28,54 @@ class AIService {
    * @returns {Promise<Object>} - Parsed intent and data
    */
   async parseMessage(message) {
-    try {
-      console.log(`🧠 Parsing message: ${message}`);
+    console.log(`🧠 Parsing message: ${message}`);
 
-      const response = await openai.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: `You are ShopGenie AI, a WhatsApp shopping assistant. Parse user messages to extract shopping intent, items, quantities, and delivery address.
+    // Try OpenAI models first
+    for (let i = 0; i < this.models.length; i++) {
+      try {
+        const model = this.models[i];
+        console.log(`🤖 Trying OpenAI model: ${model}`);
+        
+        const result = await this.parseWithOpenAI(message, model);
+        console.log(`✅ Parsed with OpenAI ${model}: ${result.intent}`);
+        return result;
+        
+      } catch (error) {
+        console.error(`❌ Failed with OpenAI model ${this.models[i]}:`, error.message);
+        
+        // Continue to next model
+        continue;
+      }
+    }
+
+    // Try Anthropic Claude if OpenAI fails
+    try {
+      console.log(`🤖 Trying Anthropic Claude`);
+      const result = await this.parseWithClaude(message);
+      console.log(`✅ Parsed with Claude: ${result.intent}`);
+      return result;
+    } catch (error) {
+      console.error(`❌ Failed with Claude:`, error.message);
+    }
+
+    // Final fallback to regex parser
+    console.log(`🔄 Falling back to regex parser`);
+    return this.fallbackParse(message);
+  }
+
+  /**
+   * Parse message with OpenAI model
+   * @param {string} message - User's message
+   * @param {string} model - Model to use
+   * @returns {Promise<Object>} - Parsed intent and data
+   */
+  async parseWithOpenAI(message, model) {
+    const response = await openai.chat.completions.create({
+      model: model,
+      messages: [
+        {
+          role: 'system',
+          content: `You are ShopGenie AI, a WhatsApp shopping assistant. Parse user messages to extract shopping intent, items, quantities, and delivery address.
 
 Parse the message and return a JSON object with the following structure:
 {
@@ -51,27 +101,66 @@ Examples:
 - "Zepto for milk, Blinkit for bread" → intent: "retailer_selection", choices: {"milk": "Zepto", "bread": "Blinkit"}
 
 Only return valid JSON.`
-          },
-          {
-            role: 'user',
-            content: message
-          }
-        ],
-        temperature: 0.1,
-        max_tokens: 500,
-        response_format: { type: "json_object" }
-      });
+        },
+        {
+          role: 'user',
+          content: message
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 500,
+      response_format: { type: "json_object" }
+    });
 
-      const parsedData = JSON.parse(response.choices[0].message.content);
-      console.log(`✅ Parsed intent: ${parsedData.intent}`);
-      
-      return parsedData;
-    } catch (error) {
-      console.error('❌ Error parsing message with AI:', error);
-      
-      // Fallback to simple regex parsing
-      return this.fallbackParse(message);
+    const parsedData = JSON.parse(response.choices[0].message.content);
+    return parsedData;
+  }
+
+  /**
+   * Parse message with Anthropic Claude
+   * @param {string} message - User's message
+   * @returns {Promise<Object>} - Parsed intent and data
+   */
+  async parseWithClaude(message) {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('Anthropic API key not configured');
     }
+
+    const response = await anthropic.messages.create({
+      model: 'claude-3-haiku-20240307',
+      max_tokens: 500,
+      messages: [
+        {
+          role: 'user',
+          content: `You are ShopGenie AI, a WhatsApp shopping assistant. Parse this user message to extract shopping intent, items, quantities, and delivery address.
+
+Parse the message and return a JSON object with the following structure:
+{
+  "intent": "order|add_item|remove_item|address_confirmation|retailer_selection|help|unknown",
+  "items": [
+    {
+      "name": "item name",
+      "quantity": "quantity value",
+      "unit": "unit (kg, L, pc, etc.)",
+      "brand": "brand name (optional)"
+    }
+  ],
+  "address": "full address text if provided",
+  "confirmed": true/false (for address confirmation),
+  "choices": {} (for retailer selection),
+  "confidence": 0.0-1.0
+}
+
+User message: ${message}
+
+Only return valid JSON.`
+        }
+      ]
+    });
+
+    const content = response.content[0].text;
+    const parsedData = JSON.parse(content);
+    return parsedData;
   }
 
   /**
