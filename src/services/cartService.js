@@ -1,0 +1,421 @@
+const { query } = require('../database/connection');
+const aiService = require('./aiService');
+
+class CartService {
+  /**
+   * Get user's active cart
+   * @param {number} userId - User ID
+   * @returns {Promise<Object|null>} - Active cart object or null
+   */
+  async getActiveCart(userId) {
+    try {
+      const result = await query(
+        'SELECT * FROM carts WHERE user_id = $1 AND status = $2 ORDER BY created_at DESC LIMIT 1',
+        [userId, 'draft']
+      );
+      
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('❌ Error getting active cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new cart for user
+   * @param {number} userId - User ID
+   * @returns {Promise<Object>} - Created cart object
+   */
+  async createCart(userId) {
+    try {
+      // Close any existing active carts
+      await query(
+        'UPDATE carts SET status = $1 WHERE user_id = $2 AND status = $3',
+        ['cancelled', userId, 'draft']
+      );
+
+      // Create new cart
+      const result = await query(
+        'INSERT INTO carts (user_id, status) VALUES ($1, $2) RETURNING *',
+        [userId, 'draft']
+      );
+      
+      console.log(`✅ Created new cart for user ${userId}`);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Error creating cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Add item to cart
+   * @param {number} cartId - Cart ID
+   * @param {Object} item - Item object
+   * @returns {Promise<Object>} - Added cart item object
+   */
+  async addItemToCart(cartId, item) {
+    try {
+      const result = await query(
+        `INSERT INTO cart_items (
+          cart_id, query, normalized_name, quantity, unit, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [
+          cartId,
+          `${item.quantity} ${item.unit} ${item.name}`,
+          item.name,
+          item.quantity,
+          item.unit,
+          item.notes || null
+        ]
+      );
+      
+      console.log(`✅ Added item to cart ${cartId}: ${item.name}`);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Error adding item to cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove item from cart
+   * @param {number} cartItemId - Cart item ID
+   * @returns {Promise<boolean>} - Success status
+   */
+  async removeItemFromCart(cartItemId) {
+    try {
+      await query('DELETE FROM cart_items WHERE id = $1', [cartItemId]);
+      
+      console.log(`✅ Removed item ${cartItemId} from cart`);
+      return true;
+    } catch (error) {
+      console.error('❌ Error removing item from cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get cart items
+   * @param {number} cartId - Cart ID
+   * @returns {Promise<Array>} - Array of cart items
+   */
+  async getCartItems(cartId) {
+    try {
+      const result = await query(
+        'SELECT * FROM cart_items WHERE cart_id = $1 ORDER BY created_at ASC',
+        [cartId]
+      );
+      
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error getting cart items:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update cart item
+   * @param {number} cartItemId - Cart item ID
+   * @param {Object} updates - Fields to update
+   * @returns {Promise<Object>} - Updated cart item object
+   */
+  async updateCartItem(cartItemId, updates) {
+    try {
+      const fields = [];
+      const values = [];
+      let paramCount = 1;
+
+      Object.keys(updates).forEach(key => {
+        if (updates[key] !== undefined) {
+          fields.push(`${key} = $${paramCount}`);
+          values.push(updates[key]);
+          paramCount++;
+        }
+      });
+
+      if (fields.length === 0) {
+        throw new Error('No fields to update');
+      }
+
+      values.push(cartItemId);
+      const result = await query(
+        `UPDATE cart_items SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+        values
+      );
+      
+      console.log(`✅ Updated cart item ${cartItemId}`);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Error updating cart item:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get price comparisons for cart items
+   * @param {number} cartId - Cart ID
+   * @returns {Promise<Array>} - Array of price comparisons
+   */
+  async getPriceComparisons(cartId) {
+    try {
+      const items = await this.getCartItems(cartId);
+      const comparisons = [];
+
+      for (const item of items) {
+        // Get price suggestions from AI service
+        const priceSuggestions = await aiService.getPriceSuggestions([item], null);
+        
+        if (priceSuggestions.length > 0) {
+          comparisons.push(priceSuggestions[0]);
+        }
+      }
+
+      return comparisons;
+    } catch (error) {
+      console.error('❌ Error getting price comparisons:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update retailer choices for cart
+   * @param {number} cartId - Cart ID
+   * @param {Object} choices - Retailer choices for items
+   * @returns {Promise<Object>} - Updated cart object
+   */
+  async updateRetailerChoices(cartId, choices) {
+    try {
+      const result = await query(
+        'UPDATE carts SET retailer_choices = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+        [JSON.stringify(choices), cartId]
+      );
+      
+      console.log(`✅ Updated retailer choices for cart ${cartId}`);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Error updating retailer choices:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate final cart summary
+   * @param {number} cartId - Cart ID
+   * @returns {Promise<Object>} - Final cart summary
+   */
+  async generateFinalCart(cartId) {
+    try {
+      const cart = await query('SELECT * FROM carts WHERE id = $1', [cartId]);
+      if (!cart.rows[0]) {
+        throw new Error('Cart not found');
+      }
+
+      const items = await this.getCartItems(cartId);
+      const retailerChoices = cart.rows[0].retailer_choices || {};
+      
+      const retailerCarts = {};
+      const retailerTotals = {};
+      const deepLinks = {};
+
+      // Group items by retailer
+      for (const item of items) {
+        const selectedRetailer = retailerChoices[item.normalized_name];
+        if (selectedRetailer) {
+          if (!retailerCarts[selectedRetailer]) {
+            retailerCarts[selectedRetailer] = [];
+            retailerTotals[selectedRetailer] = 0;
+          }
+
+          // Get price for this item from the selected retailer
+          const priceSuggestions = await aiService.getPriceSuggestions([item], null);
+          const price = priceSuggestions[0]?.prices?.find(p => p.retailer === selectedRetailer)?.price || 0;
+
+          retailerCarts[selectedRetailer].push({
+            name: item.normalized_name,
+            quantity: item.quantity,
+            unit: item.unit,
+            price: price
+          });
+
+          retailerTotals[selectedRetailer] += price;
+        }
+      }
+
+      // Generate deep links
+      for (const [retailer, items] of Object.entries(retailerCarts)) {
+        const itemNames = items.map(item => item.name).join(' ');
+        deepLinks[retailer] = this.generateRetailerDeepLink(retailer, itemNames);
+      }
+
+      // Calculate grand total
+      const grandTotal = Object.values(retailerTotals).reduce((sum, total) => sum + total, 0);
+
+      return {
+        cartId,
+        retailerCarts,
+        retailerTotals,
+        deepLinks,
+        grandTotal
+      };
+    } catch (error) {
+      console.error('❌ Error generating final cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate deep link for retailer
+   * @param {string} retailer - Retailer name
+   * @param {string} items - Items string
+   * @returns {string} - Deep link URL
+   */
+  generateRetailerDeepLink(retailer, items) {
+    const encodedItems = encodeURIComponent(items);
+    
+    switch (retailer.toLowerCase()) {
+      case 'zepto':
+        return `https://www.zepto.in/search?q=${encodedItems}`;
+      case 'blinkit':
+        return `https://blinkit.com/s/?q=${encodedItems}`;
+      case 'instamart':
+        return `https://www.swiggy.com/instamart?query=${encodedItems}`;
+      default:
+        return `https://www.google.com/search?q=${encodedItems}+${retailer}`;
+    }
+  }
+
+  /**
+   * Save price quotes for cart items
+   * @param {number} cartId - Cart ID
+   * @param {Array} priceQuotes - Array of price quote objects
+   * @returns {Promise<Array>} - Saved price quote objects
+   */
+  async savePriceQuotes(cartId, priceQuotes) {
+    try {
+      const items = await this.getCartItems(cartId);
+      const savedQuotes = [];
+
+      for (const item of items) {
+        const itemQuotes = priceQuotes.find(q => q.name === item.normalized_name);
+        
+        if (itemQuotes && itemQuotes.prices) {
+          for (const price of itemQuotes.prices) {
+            const result = await query(
+              `INSERT INTO price_quotes (
+                cart_item_id, retailer, product_title, unit_price, currency, product_url, metadata
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+              [
+                item.id,
+                price.retailer,
+                itemQuotes.name,
+                price.price,
+                'INR',
+                price.product_url || null,
+                JSON.stringify({
+                  delivery_time: price.delivery_time,
+                  availability: price.availability
+                })
+              ]
+            );
+            
+            savedQuotes.push(result.rows[0]);
+          }
+        }
+      }
+
+      console.log(`✅ Saved ${savedQuotes.length} price quotes for cart ${cartId}`);
+      return savedQuotes;
+    } catch (error) {
+      console.error('❌ Error saving price quotes:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get cart history for user
+   * @param {number} userId - User ID
+   * @param {number} limit - Number of carts to retrieve
+   * @returns {Promise<Array>} - Array of cart objects
+   */
+  async getCartHistory(userId, limit = 10) {
+    try {
+      const result = await query(
+        'SELECT * FROM carts WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+        [userId, limit]
+      );
+      
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error getting cart history:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get cart statistics
+   * @param {number} cartId - Cart ID
+   * @returns {Promise<Object>} - Cart statistics
+   */
+  async getCartStats(cartId) {
+    try {
+      const itemCount = await query(
+        'SELECT COUNT(*) as count FROM cart_items WHERE cart_id = $1',
+        [cartId]
+      );
+
+      const totalValue = await query(
+        'SELECT SUM(unit_price) as total FROM price_quotes WHERE cart_item_id IN (SELECT id FROM cart_items WHERE cart_id = $1)',
+        [cartId]
+      );
+
+      return {
+        itemCount: parseInt(itemCount.rows[0].count),
+        totalValue: parseFloat(totalValue.rows[0].total || 0)
+      };
+    } catch (error) {
+      console.error('❌ Error getting cart stats:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear cart (remove all items)
+   * @param {number} cartId - Cart ID
+   * @returns {Promise<boolean>} - Success status
+   */
+  async clearCart(cartId) {
+    try {
+      await query('DELETE FROM cart_items WHERE cart_id = $1', [cartId]);
+      
+      console.log(`✅ Cleared cart ${cartId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Error clearing cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Close cart (mark as completed)
+   * @param {number} cartId - Cart ID
+   * @param {string} status - Final status (handed_off, ordered, cancelled)
+   * @returns {Promise<Object>} - Updated cart object
+   */
+  async closeCart(cartId, status = 'handed_off') {
+    try {
+      const result = await query(
+        'UPDATE carts SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+        [status, cartId]
+      );
+      
+      console.log(`✅ Closed cart ${cartId} with status: ${status}`);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Error closing cart:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = new CartService(); 
