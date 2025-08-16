@@ -11,15 +11,10 @@ const cartService = require('../services/cartService');
 // Twilio client
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-// Webhook verification for Twilio
+// Webhook verification for Twilio (simplified for sandbox)
 router.get('/', (req, res) => {
-  const { hub } = req.query;
-  
-  if (hub.mode === 'subscribe' && hub.verify_token === process.env.WEBHOOK_SECRET) {
-    res.status(200).send(hub.challenge);
-  } else {
-    res.status(403).send('Forbidden');
-  }
+  // For Twilio sandbox, we don't need complex verification
+  res.status(200).send('WhatsApp webhook is ready');
 });
 
 // Main webhook endpoint for incoming messages
