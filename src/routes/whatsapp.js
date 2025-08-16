@@ -46,8 +46,10 @@ router.post('/', async (req, res) => {
 
     // Check if user is allowed (for Phase 1)
     const allowedRecipients = process.env.ALLOWED_RECIPIENTS.split(',');
-    if (!allowedRecipients.includes(from)) {
-      console.log(`❌ Unauthorized user: ${from}`);
+    const cleanFrom = from.replace('whatsapp:', ''); // Remove whatsapp: prefix
+    
+    if (!allowedRecipients.includes(cleanFrom)) {
+      console.log(`❌ Unauthorized user: ${cleanFrom}`);
       await whatsappService.sendMessage(
         from,
         "❌ This bot is currently in private beta. Please wait for public release."
@@ -68,10 +70,13 @@ router.post('/', async (req, res) => {
 // Process incoming message
 async function processMessage(from, message, messageSid) {
   try {
+    // Clean the phone number (remove whatsapp: prefix)
+    const cleanFrom = from.replace('whatsapp:', '');
+    
     // Get or create user
-    let user = await userService.getUserByPhone(from);
+    let user = await userService.getUserByPhone(cleanFrom);
     if (!user) {
-      user = await userService.createUser(from);
+      user = await userService.createUser(cleanFrom);
       await whatsappService.sendMessage(
         from,
         "👋 Welcome to ShopGenie AI! 🛒\n\nI can help you compare prices across grocery platforms and build your cart.\n\nTry saying: 'Order milk and bread to 123 Main St, Bangalore'"
