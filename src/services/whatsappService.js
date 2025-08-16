@@ -14,10 +14,13 @@ class WhatsAppService {
     try {
       console.log(`📤 Sending message to ${to}: ${message.substring(0, 50)}...`);
       
+      // Clean the phone number (remove whatsapp: prefix if present)
+      const cleanTo = to.replace('whatsapp:', '');
+      
       const twilioMessage = await twilioClient.messages.create({
         body: message,
         from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-        to: `whatsapp:${to}`
+        to: `whatsapp:${cleanTo}`
       });
 
       console.log(`✅ Message sent successfully. SID: ${twilioMessage.sid}`);
@@ -39,11 +42,14 @@ class WhatsAppService {
     try {
       console.log(`📤 Sending media message to ${to}`);
       
+      // Clean the phone number (remove whatsapp: prefix if present)
+      const cleanTo = to.replace('whatsapp:', '');
+      
       const twilioMessage = await twilioClient.messages.create({
         mediaUrl: [mediaUrl],
         body: caption,
         from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-        to: `whatsapp:${to}`
+        to: `whatsapp:${cleanTo}`
       });
 
       console.log(`✅ Media message sent successfully. SID: ${twilioMessage.sid}`);
@@ -65,10 +71,13 @@ class WhatsAppService {
     try {
       console.log(`📤 Sending template message to ${to}: ${templateName}`);
       
+      // Clean the phone number (remove whatsapp: prefix if present)
+      const cleanTo = to.replace('whatsapp:', '');
+      
       const twilioMessage = await twilioClient.messages.create({
         body: this.formatTemplate(templateName, variables),
         from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-        to: `whatsapp:${to}`
+        to: `whatsapp:${cleanTo}`
       });
 
       console.log(`✅ Template message sent successfully. SID: ${twilioMessage.sid}`);
