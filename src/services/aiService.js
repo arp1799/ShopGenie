@@ -24,25 +24,32 @@ class AIService {
   async parseMessage(message) {
     console.log(`🧠 Parsing message: ${message}`);
 
-    // Try OpenAI models first
-    for (let i = 0; i < this.models.length; i++) {
-      try {
-        const model = this.models[i];
-        console.log(`🤖 Trying OpenAI model: ${model}`);
-        
-        const result = await this.parseWithOpenAI(message, model);
-        console.log(`✅ Parsed with OpenAI ${model}: ${result.intent}`);
-        return result;
-        
-      } catch (error) {
-        console.error(`❌ Failed with OpenAI model ${this.models[i]}:`, error.message);
-        
-        // Continue to next model
-        continue;
+    // Check if OpenAI is disabled (for free tier users)
+    const openaiDisabled = process.env.DISABLE_OPENAI === 'true' || !process.env.OPENAI_API_KEY;
+    
+    if (!openaiDisabled) {
+      // Try OpenAI models first
+      for (let i = 0; i < this.models.length; i++) {
+        try {
+          const model = this.models[i];
+          console.log(`🤖 Trying OpenAI model: ${model}`);
+          
+          const result = await this.parseWithOpenAI(message, model);
+          console.log(`✅ Parsed with OpenAI ${model}: ${result.intent}`);
+          return result;
+          
+        } catch (error) {
+          console.error(`❌ Failed with OpenAI model ${this.models[i]}:`, error.message);
+          
+          // Continue to next model
+          continue;
+        }
       }
+    } else {
+      console.log(`🚫 OpenAI disabled, skipping to free alternatives`);
     }
 
-    // Try free Hugging Face model if OpenAI fails
+    // Try free Hugging Face model if OpenAI fails or is disabled
     try {
       console.log(`🤖 Trying free Hugging Face model`);
       const result = await this.parseWithHuggingFace(message);
