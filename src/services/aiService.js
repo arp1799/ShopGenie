@@ -47,6 +47,13 @@ class AIService {
       console.log(`🤖 Trying free Hugging Face model`);
       const result = await this.parseWithHuggingFace(message);
       console.log(`✅ Parsed with Hugging Face: ${result.intent}`);
+      
+      // If Hugging Face gives low confidence or wrong intent, fall back to regex
+      if (result.confidence < 0.7 || result.intent === 'address_confirmation') {
+        console.log(`🔄 Hugging Face confidence too low (${result.confidence}) or wrong intent, using enhanced regex parser`);
+        return this.enhancedFallbackParse(message);
+      }
+      
       return result;
     } catch (error) {
       console.error(`❌ Failed with Hugging Face:`, error.message);
@@ -225,10 +232,22 @@ Only return valid JSON.`
 
     // Check if message looks like an address (enhanced detection)
     if (this.looksLikeAddress(message)) {
+      // Extract address from the message
+      let address = message.trim();
+      
+      // Remove common prefixes
+      const prefixes = ['my address is', 'address is', 'deliver to', 'send to'];
+      for (const prefix of prefixes) {
+        if (lowerMessage.startsWith(prefix)) {
+          address = message.substring(prefix.length).trim();
+          break;
+        }
+      }
+      
       return {
         intent: 'order',
         items: [],
-        address: message.trim(),
+        address: address,
         confidence: 0.9
       };
     }
@@ -386,7 +405,13 @@ Only return valid JSON.`
     // Check for common address patterns (number + text)
     const hasAddressPattern = /^[A-Z0-9\-\/,\s]+$/i.test(message.trim()) && message.length > 10;
     
-    return hasPincode || hasAddressKeywords || hasAddressPattern;
+    // Check for address-like structure (contains numbers and city names)
+    const hasAddressStructure = /\d+/.test(message) && addressKeywords.some(keyword => lowerMessage.includes(keyword));
+    
+    // Check if message contains "address" keyword
+    const hasAddressKeyword = lowerMessage.includes('address');
+    
+    return hasPincode || hasAddressKeywords || hasAddressPattern || hasAddressStructure || hasAddressKeyword;
   }
 
   /**
