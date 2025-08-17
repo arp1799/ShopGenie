@@ -118,6 +118,8 @@ async function processMessage(from, message, messageSid, messageType) {
       await handleAddItemIntent(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'remove_item') {
       await handleRemoveItemIntent(from, user, parsedIntent);
+    } else if (parsedIntent.intent === 'show_cart') {
+      await handleShowCartIntent(from, user);
     } else if (parsedIntent.intent === 'address_confirmation') {
       await handleAddressConfirmation(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'retailer_selection') {
@@ -204,13 +206,15 @@ async function handleAddItemIntent(from, user, parsedIntent) {
       return;
     }
 
+    const addedItems = [];
     for (const item of parsedIntent.items) {
       await cartService.addItemToCart(cart.id, item);
+      addedItems.push(`${item.quantity} ${item.unit} ${item.name}`);
     }
 
     await whatsappService.sendMessage(
       from,
-      `✅ Added ${parsedIntent.items.length} item(s) to your cart.\n\nType 'show cart' to see your current items.`
+      `✅ Added to your cart:\n${addedItems.map(item => `• ${item}`).join('\n')}\n\nType 'show cart' to see your current items.`
     );
 
   } catch (error) {
@@ -341,7 +345,8 @@ async function sendPriceComparison(from, comparisons) {
   let message = "🛒 *Price Comparison:*\n\n";
   
   for (const item of comparisons) {
-    message += `*${item.name}*\n`;
+    const itemName = item.name || item.product_name || 'Unknown Item';
+    message += `*${itemName}*\n`;
     for (const price of item.prices) {
       message += `• ${price.retailer}: ₹${price.price}\n`;
     }
@@ -375,6 +380,48 @@ async function sendFinalCartSummary(from, finalCart) {
     await whatsappService.sendMessage(
       from,
       `🛒 ${retailer}: ${link}`
+    );
+  }
+}
+
+// Handle show cart intent
+async function handleShowCartIntent(from, user) {
+  try {
+    const cart = await cartService.getActiveCart(user.id);
+    if (!cart) {
+      await whatsappService.sendMessage(
+        from,
+        "🛒 Your cart is empty.\n\nStart by saying 'Order [items]'"
+      );
+      return;
+    }
+
+    const cartItems = await cartService.getCartItems(cart.id);
+    if (cartItems.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🛒 Your cart is empty.\n\nStart by saying 'Order [items]'"
+      );
+      return;
+    }
+
+    let message = "🛒 *Your Cart:*\n\n";
+    
+    for (const item of cartItems) {
+      message += `• ${item.product_name || item.normalized_name} - ${item.quantity} ${item.unit}\n`;
+    }
+
+    message += "\nTo add more items, say 'Add [item name]'\n";
+    message += "To see prices, say 'Show prices'\n";
+    message += "To checkout, say 'Checkout'";
+
+    await whatsappService.sendMessage(from, message);
+
+  } catch (error) {
+    console.error('❌ Error handling show cart intent:', error);
+    await whatsappService.sendMessage(
+      from,
+      "😔 Sorry, I encountered an error showing your cart. Please try again."
     );
   }
 }

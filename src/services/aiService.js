@@ -237,6 +237,14 @@ Only return valid JSON.`
       };
     }
 
+    // Check for show cart
+    if (lowerMessage.includes('show cart') || lowerMessage.includes('view cart') || lowerMessage.includes('cart')) {
+      return {
+        intent: 'show_cart',
+        confidence: 0.9
+      };
+    }
+
     // Check if message looks like an address (enhanced detection)
     if (this.looksLikeAddress(message)) {
       // Extract address from the message
