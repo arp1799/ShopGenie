@@ -141,11 +141,8 @@ async function processMessage(from, message, messageSid, messageType) {
 // Handle order intent
 async function handleOrderIntent(from, user, parsedIntent) {
   try {
-    // Check if user has a confirmed address
-    const userAddress = await userService.getUserPrimaryAddress(user.id);
-    
-    if (!userAddress && parsedIntent.address) {
-      // Validate and save address
+    // If order has address in it, handle that first
+    if (parsedIntent.address) {
       const validatedAddress = await aiService.validateAddress(parsedIntent.address);
       if (validatedAddress) {
         await userService.saveAddress(user.id, validatedAddress);
@@ -154,11 +151,21 @@ async function handleOrderIntent(from, user, parsedIntent) {
       }
     }
 
+    // Check if user has any address (including unconfirmed)
+    const userAddress = await userService.getUserPrimaryAddressIncludingUnconfirmed(user.id);
+    
+    // If no address at all, ask for one
     if (!userAddress) {
       await whatsappService.sendMessage(
         from,
         "📍 Please provide your delivery address first.\n\nYou can:\n• Type your address directly\n• Share your location 📍\n• Say 'My address is 123 Main St, Bangalore 560001'"
       );
+      return;
+    }
+
+    // If address exists but not confirmed, ask for confirmation
+    if (userAddress && !userAddress.confirmed) {
+      await sendAddressConfirmation(from, userAddress);
       return;
     }
 

@@ -63,7 +63,7 @@ class UserService {
   }
 
   /**
-   * Get user's primary address
+   * Get user's primary address (confirmed only)
    * @param {number} userId - User ID
    * @returns {Promise<Object|null>} - Address object or null
    */
@@ -77,6 +77,25 @@ class UserService {
       return result.rows[0] || null;
     } catch (error) {
       console.error('❌ Error getting user primary address:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's primary address (including unconfirmed)
+   * @param {number} userId - User ID
+   * @returns {Promise<Object|null>} - Address object or null
+   */
+  async getUserPrimaryAddressIncludingUnconfirmed(userId) {
+    try {
+      const result = await query(
+        'SELECT * FROM addresses WHERE user_id = $1 AND is_primary = true ORDER BY created_at DESC LIMIT 1',
+        [userId]
+      );
+      
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('❌ Error getting user primary address (including unconfirmed):', error);
       throw error;
     }
   }
