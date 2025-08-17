@@ -105,6 +105,28 @@ class CartService {
   }
 
   /**
+   * Add multiple items to cart with proper duplicate handling
+   * @param {number} cartId - Cart ID
+   * @param {Array} items - Array of item objects
+   * @returns {Promise<Array>} - Array of added/updated cart items
+   */
+  async addItemsToCart(cartId, items) {
+    try {
+      const results = [];
+      
+      for (const item of items) {
+        const result = await this.addItemToCart(cartId, item);
+        results.push(result);
+      }
+      
+      return results;
+    } catch (error) {
+      console.error('❌ Error adding items to cart:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Remove item from cart
    * @param {number} cartItemId - Cart item ID
    * @returns {Promise<boolean>} - Success status
@@ -136,6 +158,34 @@ class CartService {
       return result.rows;
     } catch (error) {
       console.error('❌ Error getting cart items:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get cart items with combined quantities
+   * @param {number} cartId - Cart ID
+   * @returns {Promise<Array>} - Array of cart items with combined quantities
+   */
+  async getCartItemsCombined(cartId) {
+    try {
+      const result = await query(
+        `SELECT 
+          product_name,
+          unit,
+          SUM(quantity) as total_quantity,
+          MIN(id) as first_id,
+          MIN(created_at) as first_created
+        FROM cart_items 
+        WHERE cart_id = $1 
+        GROUP BY product_name, unit 
+        ORDER BY first_created ASC`,
+        [cartId]
+      );
+      
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Error getting combined cart items:', error);
       throw error;
     }
   }

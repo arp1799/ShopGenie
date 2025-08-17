@@ -183,10 +183,8 @@ async function handleOrderIntent(from, user, parsedIntent) {
       cart = await cartService.createCart(user.id);
     }
 
-    // Add items to cart
-    for (const item of parsedIntent.items) {
-      await cartService.addItemToCart(cart.id, item);
-    }
+    // Add items to cart with proper duplicate handling
+    await cartService.addItemsToCart(cart.id, parsedIntent.items);
 
     // Get price comparisons
     const priceComparisons = await cartService.getPriceComparisons(cart.id);
@@ -354,12 +352,16 @@ async function sendPriceComparison(from, comparisons) {
     const itemName = item.name || item.product_name || 'Unknown Item';
     message += `*${itemName}*\n`;
     for (const price of item.prices) {
-      message += `• ${price.retailer}: ₹${price.price}\n`;
+      message += `➕ ${price.retailer}: ₹${price.price} (${price.delivery_time})\n`;
     }
     message += "\n";
   }
 
-  message += "Select your preferred retailer for each item by replying with the retailer name.";
+  message += "To select a retailer, reply with:\n";
+  message += "• 'Zepto for milk' - Select Zepto for milk\n";
+  message += "• 'Blinkit for bread' - Select Blinkit for bread\n";
+  message += "• 'All Zepto' - Select Zepto for all items\n";
+  message += "• 'Checkout' - Complete your order";
 
   await whatsappService.sendMessage(from, message);
 }
@@ -402,7 +404,7 @@ async function handleShowCartIntent(from, user) {
       return;
     }
 
-    const cartItems = await cartService.getCartItems(cart.id);
+    const cartItems = await cartService.getCartItemsCombined(cart.id);
     if (cartItems.length === 0) {
       await whatsappService.sendMessage(
         from,
@@ -414,7 +416,7 @@ async function handleShowCartIntent(from, user) {
     let message = "🛒 *Your Cart:*\n\n";
     
     for (const item of cartItems) {
-      message += `• ${item.product_name || item.normalized_name} - ${item.quantity} ${item.unit}\n`;
+      message += `• ${item.product_name} - ${item.total_quantity} ${item.unit}\n`;
     }
 
     message += "\nTo add more items, say 'Add [item name]'\n";
