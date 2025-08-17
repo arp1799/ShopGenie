@@ -237,6 +237,14 @@ Only return valid JSON.`
       };
     }
 
+    // Check for show prices
+    if (lowerMessage.includes('show price') || lowerMessage.includes('price') || lowerMessage.includes('prices')) {
+      return {
+        intent: 'show_prices',
+        confidence: 0.9
+      };
+    }
+
     // Check for show cart
     if (lowerMessage.includes('show cart') || lowerMessage.includes('view cart') || lowerMessage.includes('cart')) {
       return {
@@ -355,14 +363,30 @@ Only return valid JSON.`
 
     // If no structured patterns found, try to extract simple items
     if (items.length === 0) {
-      const simpleItems = text.match(/\b(milk|bread|eggs|tomatoes|onions|potatoes|rice|sugar|salt|oil|butter|cheese|yogurt|fruits|vegetables)\b/gi);
-      if (simpleItems) {
-        simpleItems.forEach(item => {
+      // First try multi-word items (like "peanut butter")
+      const multiWordItems = text.match(/\b(peanut butter|chocolate milk|whole wheat bread|brown bread|white bread|fresh milk|skim milk|full cream milk|olive oil|coconut oil|sunflower oil|vanilla ice cream|chocolate ice cream|strawberry ice cream|green tea|black tea|coffee powder|sugar free|low fat|organic|fresh|frozen)\b/gi);
+      if (multiWordItems) {
+        multiWordItems.forEach(item => {
           items.push({
             name: item.toLowerCase(),
             quantity: 1,
             unit: 'pc'
           });
+        });
+      }
+      
+      // Then try single word items
+      const simpleItems = text.match(/\b(milk|bread|eggs|tomatoes|onions|potatoes|rice|sugar|salt|oil|butter|cheese|yogurt|fruits|vegetables|apple|banana|orange|mango|grapes|carrot|cucumber|lettuce|spinach|chicken|fish|meat|paneer|tofu|noodles|pasta|sauce|ketchup|mayonnaise|jam|honey|chocolate|biscuits|cookies|cake|ice cream|juice|soda|water|tea|coffee)\b/gi);
+      if (simpleItems) {
+        simpleItems.forEach(item => {
+          // Skip if already added as multi-word item
+          if (!items.some(existing => existing.name.includes(item.toLowerCase()))) {
+            items.push({
+              name: item.toLowerCase(),
+              quantity: 1,
+              unit: 'pc'
+            });
+          }
         });
       }
     }
@@ -420,7 +444,7 @@ Only return valid JSON.`
     const hasAddressKeywords = addressKeywords.some(keyword => lowerMessage.includes(keyword));
     
     // Check for common address patterns (number + text)
-    const hasAddressPattern = /^[A-Z0-9\-\/,\s]+$/i.test(message.trim()) && message.length > 10;
+    const hasAddressPattern = /^[A-Z0-9\-\/,\s]+$/i.test(message.trim()) && message.length > 10 && !lowerMessage.includes('show') && !lowerMessage.includes('price');
     
     // Check for address-like structure (contains numbers and city names)
     const hasAddressStructure = /\d+/.test(message) && addressKeywords.some(keyword => lowerMessage.includes(keyword));
@@ -723,15 +747,21 @@ Only return valid JSON.`
         };
       }
 
-      // Fallback to realistic mock data
-      const mockData = this.getRealisticMockPrice(itemName, 'zepto');
-      console.log(`🔍 Zepto fallback price for ${itemName}: ₹${mockData.price}`);
-      
-      return mockData;
+      console.log(`🔍 Zepto scraping failed for ${itemName}, showing N/A`);
+      return {
+        price: 'N/A',
+        delivery_time: 'N/A',
+        in_stock: false,
+        search_url: searchUrl
+      };
     } catch (error) {
       console.error('❌ Error scraping Zepto:', error.message);
-      // Fallback to realistic mock data
-      return this.getRealisticMockPrice(itemName, 'zepto');
+      return {
+        price: 'N/A',
+        delivery_time: 'N/A',
+        in_stock: false,
+        search_url: searchUrl
+      };
     }
   }
 
@@ -797,13 +827,21 @@ Only return valid JSON.`
         };
       }
 
-      const mockData = this.getRealisticMockPrice(itemName, 'blinkit');
-      console.log(`🔍 Blinkit fallback price for ${itemName}: ₹${mockData.price}`);
-      
-      return mockData;
+      console.log(`🔍 Blinkit scraping failed for ${itemName}, showing N/A`);
+      return {
+        price: 'N/A',
+        delivery_time: 'N/A',
+        in_stock: false,
+        search_url: searchUrl
+      };
     } catch (error) {
       console.error('❌ Error scraping Blinkit:', error.message);
-      return this.getRealisticMockPrice(itemName, 'blinkit');
+      return {
+        price: 'N/A',
+        delivery_time: 'N/A',
+        in_stock: false,
+        search_url: searchUrl
+      };
     }
   }
 
@@ -869,13 +907,21 @@ Only return valid JSON.`
         };
       }
 
-      const mockData = this.getRealisticMockPrice(itemName, 'instamart');
-      console.log(`🔍 Instamart fallback price for ${itemName}: ₹${mockData.price}`);
-      
-      return mockData;
+      console.log(`🔍 Instamart scraping failed for ${itemName}, showing N/A`);
+      return {
+        price: 'N/A',
+        delivery_time: 'N/A',
+        in_stock: false,
+        search_url: searchUrl
+      };
     } catch (error) {
       console.error('❌ Error scraping Instamart:', error.message);
-      return this.getRealisticMockPrice(itemName, 'instamart');
+      return {
+        price: 'N/A',
+        delivery_time: 'N/A',
+        in_stock: false,
+        search_url: searchUrl
+      };
     }
   }
 

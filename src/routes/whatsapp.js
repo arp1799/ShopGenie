@@ -124,6 +124,8 @@ async function processMessage(from, message, messageSid, messageType) {
       await handleAddItemIntent(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'remove_item') {
       await handleRemoveItemIntent(from, user, parsedIntent);
+    } else if (parsedIntent.intent === 'show_prices') {
+      await handleShowPricesIntent(from, user);
     } else if (parsedIntent.intent === 'show_cart') {
       await handleShowCartIntent(from, user);
     } else if (parsedIntent.intent === 'address_confirmation') {
@@ -348,11 +350,25 @@ Reply with:
 async function sendPriceComparison(from, comparisons) {
   let message = "🛒 *Price Comparison:*\n\n";
   
+  // Remove duplicates by item name
+  const uniqueItems = [];
+  const seenItems = new Set();
+  
   for (const item of comparisons) {
+    const itemName = item.name || item.product_name || 'Unknown Item';
+    if (!seenItems.has(itemName.toLowerCase())) {
+      seenItems.add(itemName.toLowerCase());
+      uniqueItems.push(item);
+    }
+  }
+  
+  for (const item of uniqueItems) {
     const itemName = item.name || item.product_name || 'Unknown Item';
     message += `*${itemName}*\n`;
     for (const price of item.prices) {
-      message += `➕ ${price.retailer}: ₹${price.price} (${price.delivery_time})\n`;
+      const priceDisplay = price.price === 'N/A' ? 'N/A' : `₹${price.price}`;
+      const deliveryDisplay = price.delivery_time === 'N/A' ? 'N/A' : price.delivery_time;
+      message += `• ${price.retailer}: ${priceDisplay} (${deliveryDisplay})\n`;
     }
     message += "\n";
   }
@@ -388,6 +404,39 @@ async function sendFinalCartSummary(from, finalCart) {
     await whatsappService.sendMessage(
       from,
       `🛒 ${retailer}: ${link}`
+    );
+  }
+}
+
+// Handle show prices intent
+async function handleShowPricesIntent(from, user) {
+  try {
+    const cart = await cartService.getActiveCart(user.id);
+    if (!cart) {
+      await whatsappService.sendMessage(
+        from,
+        "🛒 Your cart is empty.\n\nStart by saying 'Order [items]'"
+      );
+      return;
+    }
+
+    const priceComparisons = await cartService.getPriceComparisons(cart.id);
+    if (priceComparisons.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🛒 Your cart is empty.\n\nStart by saying 'Order [items]'"
+      );
+      return;
+    }
+
+    // Send price comparison message
+    await sendPriceComparison(from, priceComparisons);
+
+  } catch (error) {
+    console.error('❌ Error handling show prices intent:', error);
+    await whatsappService.sendMessage(
+      from,
+      "😔 Sorry, I encountered an error showing prices. Please try again."
     );
   }
 }
