@@ -489,6 +489,55 @@ Only return valid JSON.`
   }
 
   /**
+   * Reverse geocode coordinates to get address using Google Maps API
+   * @param {number} latitude - Latitude coordinate
+   * @param {number} longitude - Longitude coordinate
+   * @returns {Promise<Object|null>} - Address object or null
+   */
+  async reverseGeocode(latitude, longitude) {
+    try {
+      console.log(`📍 Reverse geocoding: ${latitude}, ${longitude}`);
+
+      const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+        params: {
+          latlng: `${latitude},${longitude}`,
+          key: process.env.GOOGLE_MAPS_API_KEY,
+          region: 'in' // Bias towards India
+        }
+      });
+
+      if (response.data.status === 'OK' && response.data.results.length > 0) {
+        const result = response.data.results[0];
+        
+        // Extract components
+        const components = {};
+        result.address_components.forEach(component => {
+          const types = component.types;
+          if (types.includes('street_number')) components.street_number = component.long_name;
+          if (types.includes('route')) components.route = component.long_name;
+          if (types.includes('locality')) components.city = component.long_name;
+          if (types.includes('administrative_area_level_1')) components.state = component.long_name;
+          if (types.includes('postal_code')) components.pincode = component.long_name;
+          if (types.includes('country')) components.country = component.long_name;
+        });
+
+        return {
+          formatted: result.formatted_address,
+          latitude: latitude,
+          longitude: longitude,
+          components: components,
+          pincode: components.pincode
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error('❌ Error reverse geocoding:', error);
+      return null;
+    }
+  }
+
+  /**
    * Get price suggestions for items (mock data for Phase 1)
    * @param {Array} items - Array of items
    * @param {string} pincode - Delivery pincode

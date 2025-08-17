@@ -41,8 +41,9 @@ router.post('/', async (req, res) => {
     const message = req.body.Body;
     const from = req.body.From; // WhatsApp number
     const messageSid = req.body.MessageSid;
+    const messageType = req.body.MediaContentType0 || 'text'; // Check if it's a location or text
 
-    console.log(`📱 Received message from ${from}: ${message}`);
+    console.log(`📱 Received message from ${from}: ${message} (Type: ${messageType})`);
 
     // Check if user is allowed (for Phase 1)
     const allowedRecipients = process.env.ALLOWED_RECIPIENTS.split(',');
@@ -58,7 +59,7 @@ router.post('/', async (req, res) => {
     }
 
     // Process the message
-    await processMessage(from, message, messageSid);
+    await processMessage(from, message, messageSid, messageType);
 
     res.status(200).send('OK');
   } catch (error) {
@@ -68,7 +69,7 @@ router.post('/', async (req, res) => {
 });
 
 // Process incoming message
-async function processMessage(from, message, messageSid) {
+async function processMessage(from, message, messageSid, messageType) {
   try {
     // Clean the phone number (remove whatsapp: prefix)
     const cleanFrom = from.replace('whatsapp:', '');
@@ -99,6 +100,12 @@ async function processMessage(from, message, messageSid) {
         from,
         "👋 You've been unsubscribed from ShopGenie AI. Send 'start' to re-enable."
       );
+      return;
+    }
+
+    // Handle location messages
+    if (messageType === 'application/vnd.geo+json' || messageType === 'location') {
+      await handleLocationMessage(from, user, message, messageSid);
       return;
     }
 
@@ -150,7 +157,7 @@ async function handleOrderIntent(from, user, parsedIntent) {
     if (!userAddress) {
       await whatsappService.sendMessage(
         from,
-        "📍 Please provide your delivery address first.\n\nExample: 'My address is 123 Main St, Bangalore 560001'"
+        "📍 Please provide your delivery address first.\n\nYou can:\n• Type your address directly\n• Share your location 📍\n• Say 'My address is 123 Main St, Bangalore 560001'"
       );
       return;
     }
@@ -280,7 +287,10 @@ async function sendHelpMessage(from) {
   const helpText = `🛒 *ShopGenie AI Help*
 
 *How to use:*
-1. 📍 Set your address: "My address is 123 Main St, Bangalore"
+1. 📍 Set your address:
+   • Type: "My address is 123 Main St, Bangalore"
+   • Type directly: "B-102, HSR Layout, Bangalore 560102"
+   • Share location: 📍 (Use WhatsApp location feature)
 2. 🛒 Order items: "Order milk and bread"
 3. 🏪 Choose retailers: Select from the options provided
 4. 🔗 Get cart links: Click the links to complete your order
@@ -295,8 +305,10 @@ async function sendHelpMessage(from) {
 • Blinkit  
 • Swiggy Instamart
 
-*Example:*
-"Order 2L Amul milk and 1 loaf bread to 123 Main St, Bangalore 560001"
+*Examples:*
+• "Order 2L Amul milk and 1 loaf bread to 123 Main St, Bangalore 560001"
+• "B-102, Manar Elegance, HSR Layout, Bangalore 560102"
+• Share your location 📍
 
 Need help? Just type your question!`;
 
@@ -356,6 +368,61 @@ async function sendFinalCartSummary(from, finalCart) {
     await whatsappService.sendMessage(
       from,
       `🛒 ${retailer}: ${link}`
+    );
+  }
+}
+
+// Handle location messages from WhatsApp
+async function handleLocationMessage(from, user, message, messageSid) {
+  try {
+    console.log(`📍 Processing location message from ${from}`);
+    
+    // Parse location data from WhatsApp
+    let locationData;
+    try {
+      locationData = JSON.parse(message);
+    } catch (error) {
+      console.error('❌ Failed to parse location JSON:', error);
+      await whatsappService.sendMessage(
+        from,
+        "❌ Sorry, I couldn't read your location. Please try sharing it again or type your address manually."
+      );
+      return;
+    }
+
+    // Extract coordinates
+    const { latitude, longitude } = locationData;
+    if (!latitude || !longitude) {
+      await whatsappService.sendMessage(
+        from,
+        "❌ Location data incomplete. Please try sharing your location again."
+      );
+      return;
+    }
+
+    console.log(`📍 Location received: ${latitude}, ${longitude}`);
+
+    // Reverse geocode to get address
+    const address = await aiService.reverseGeocode(latitude, longitude);
+    if (!address) {
+      await whatsappService.sendMessage(
+        from,
+        "❌ Couldn't find address for this location. Please type your address manually."
+      );
+      return;
+    }
+
+    // Save the address
+    await userService.saveAddress(user.id, address);
+    
+    // Ask for confirmation
+    await sendAddressConfirmation(from, address);
+
+  } catch (error) {
+    console.error('❌ Error handling location message:', error);
+    await whatsappService.sendMessage(
+      from,
+      "😔 Sorry, I encountered an error processing your location. Please try typing your address manually."
     );
   }
 }
