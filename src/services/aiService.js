@@ -56,7 +56,7 @@ class AIService {
       console.log(`✅ Parsed with Hugging Face: ${result.intent}`);
       
       // If Hugging Face gives low confidence or wrong intent, fall back to regex
-      if (result.confidence < 0.7 || result.intent === 'address_confirmation') {
+      if (result.confidence < 0.5 || result.intent === 'address_confirmation') {
         console.log(`🔄 Hugging Face confidence too low (${result.confidence}) or wrong intent, using enhanced regex parser`);
         return this.enhancedFallbackParse(message);
       }
@@ -251,6 +251,8 @@ Only return valid JSON.`
         }
       }
       
+      console.log(`📍 Detected address: ${address}`);
+      
       return {
         intent: 'order',
         items: [],
@@ -418,7 +420,26 @@ Only return valid JSON.`
     // Check if message contains "address" keyword
     const hasAddressKeyword = lowerMessage.includes('address');
     
-    return hasPincode || hasAddressKeywords || hasAddressPattern || hasAddressStructure || hasAddressKeyword;
+    // Check for specific patterns like "B-102" (building numbers)
+    const hasBuildingNumber = /[A-Z]-\d+/.test(message);
+    
+    // Check for apartment/unit patterns
+    const hasUnitPattern = /(flat|apartment|unit|room)\s*\d+/i.test(message);
+    
+    const isAddress = hasPincode || hasAddressKeywords || hasAddressPattern || hasAddressStructure || hasAddressKeyword || hasBuildingNumber || hasUnitPattern;
+    
+    console.log(`🔍 Address detection for "${message}":`, {
+      hasPincode,
+      hasAddressKeywords,
+      hasAddressPattern,
+      hasAddressStructure,
+      hasAddressKeyword,
+      hasBuildingNumber,
+      hasUnitPattern,
+      isAddress
+    });
+    
+    return isAddress;
   }
 
   /**
