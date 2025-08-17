@@ -56,23 +56,48 @@ class CartService {
    */
   async addItemToCart(cartId, item) {
     try {
-      const result = await query(
-        `INSERT INTO cart_items (
-          cart_id, product_name, normalized_name, quantity, unit, notes, query
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [
-          cartId,
-          item.name, // product_name
-          item.name, // normalized_name
-          item.quantity,
-          item.unit,
-          item.notes || null,
-          `${item.quantity} ${item.unit} ${item.name}` // query
-        ]
+      // Check if item already exists in cart
+      const existingItem = await query(
+        'SELECT * FROM cart_items WHERE cart_id = $1 AND LOWER(product_name) = LOWER($2) AND unit = $3',
+        [cartId, item.name, item.unit]
       );
-      
-      console.log(`✅ Added item to cart ${cartId}: ${item.name}`);
-      return result.rows[0];
+
+      if (existingItem.rows.length > 0) {
+        // Update quantity of existing item
+        const existing = existingItem.rows[0];
+        const newQuantity = existing.quantity + item.quantity;
+        
+        const result = await query(
+          'UPDATE cart_items SET quantity = $1, query = $2 WHERE id = $3 RETURNING *',
+          [
+            newQuantity,
+            `${newQuantity} ${item.unit} ${item.name}`,
+            existing.id
+          ]
+        );
+        
+        console.log(`✅ Updated quantity for ${item.name} in cart ${cartId}: ${newQuantity} ${item.unit}`);
+        return result.rows[0];
+      } else {
+        // Add new item
+        const result = await query(
+          `INSERT INTO cart_items (
+            cart_id, product_name, normalized_name, quantity, unit, notes, query
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+          [
+            cartId,
+            item.name, // product_name
+            item.name, // normalized_name
+            item.quantity,
+            item.unit,
+            item.notes || null,
+            `${item.quantity} ${item.unit} ${item.name}` // query
+          ]
+        );
+        
+        console.log(`✅ Added item to cart ${cartId}: ${item.name}`);
+        return result.rows[0];
+      }
     } catch (error) {
       console.error('❌ Error adding item to cart:', error);
       throw error;
@@ -164,8 +189,15 @@ class CartService {
       const comparisons = [];
 
       for (const item of items) {
+        // Convert database item to format expected by AI service
+        const itemForPricing = {
+          name: item.product_name || item.normalized_name,
+          quantity: item.quantity,
+          unit: item.unit
+        };
+        
         // Get price suggestions from AI service
-        const priceSuggestions = await aiService.getPriceSuggestions([item], null);
+        const priceSuggestions = await aiService.getPriceSuggestions([itemForPricing], null);
         
         if (priceSuggestions.length > 0) {
           comparisons.push(priceSuggestions[0]);

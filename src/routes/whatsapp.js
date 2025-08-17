@@ -103,6 +103,12 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
 
+    // Check for show cart command (direct check)
+    if (message.toLowerCase().includes('show cart') || message.toLowerCase().includes('view cart')) {
+      await handleShowCartIntent(from, user);
+      return;
+    }
+
     // Handle location messages
     if (messageType === 'application/vnd.geo+json' || messageType === 'location') {
       await handleLocationMessage(from, user, message, messageSid);
