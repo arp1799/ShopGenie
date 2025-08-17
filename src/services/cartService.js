@@ -58,15 +58,16 @@ class CartService {
     try {
       const result = await query(
         `INSERT INTO cart_items (
-          cart_id, query, normalized_name, quantity, unit, notes
-        ) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+          cart_id, product_name, normalized_name, quantity, unit, notes, query
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
         [
           cartId,
-          `${item.quantity} ${item.unit} ${item.name}`,
-          item.name,
+          item.name, // product_name
+          item.name, // normalized_name
           item.quantity,
           item.unit,
-          item.notes || null
+          item.notes || null,
+          `${item.quantity} ${item.unit} ${item.name}` // query
         ]
       );
       

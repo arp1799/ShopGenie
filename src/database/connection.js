@@ -144,6 +144,12 @@ async function initializeTables() {
       await client.query('ALTER TABLE cart_items ADD COLUMN query TEXT');
       console.log('✅ Added query column to cart_items table');
     }
+    
+    // Check if product_name column exists and add it if not
+    if (!cartItemsColumnNames.includes('product_name')) {
+      await client.query('ALTER TABLE cart_items ADD COLUMN product_name TEXT');
+      console.log('✅ Added product_name column to cart_items table');
+    }
 
     // Check carts table structure
     const cartsColumns = await client.query(`
