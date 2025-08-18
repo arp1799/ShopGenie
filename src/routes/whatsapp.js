@@ -225,6 +225,10 @@ async function handleAddItemIntent(from, user, parsedIntent) {
       `✅ Added to your cart:\n${addedItems.map(item => `• ${item}`).join('\n')}\n\nType 'show cart' to see your current items.`
     );
 
+    // Show product suggestions for the newly added items
+    const productSuggestions = await cartService.getProductSuggestions(cart.id);
+    await sendProductSuggestions(from, productSuggestions);
+
   } catch (error) {
     console.error('❌ Error handling add item intent:', error);
     throw error;
@@ -355,15 +359,32 @@ async function sendProductSuggestions(from, suggestions) {
   for (const [itemName, retailers] of Object.entries(suggestions)) {
     message += `*${itemName}*\n`;
     
-    for (const [retailer, products] of Object.entries(retailers)) {
-      if (products.length > 0) {
-        message += `\n*${retailer.charAt(0).toUpperCase() + retailer.slice(1)}:*\n`;
-        
-        products.forEach((product, index) => {
-          const priceDisplay = product.price === 'N/A' ? 'N/A' : `₹${product.price}`;
-          const deliveryDisplay = product.delivery_time === 'N/A' ? 'N/A' : product.delivery_time;
-          message += `${index + 1}. ${product.name} - ${priceDisplay} (${deliveryDisplay})\n`;
-        });
+    // Get mixed suggestions from all retailers for this item
+    const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName);
+    
+    if (mixedSuggestions.length > 0) {
+      message += "\n*Best Options (All Retailers):*\n";
+      
+      mixedSuggestions.forEach((product, index) => {
+        const priceDisplay = product.price === 'N/A' ? 'N/A' : `₹${product.price}`;
+        const deliveryDisplay = product.delivery_time === 'N/A' ? 'N/A' : product.delivery_time;
+        const stockStatus = product.in_stock ? '✅' : '❌ Out of Stock';
+        message += `${index + 1}. ${product.name} - ${priceDisplay} (${deliveryDisplay}) ${stockStatus}\n`;
+        message += `   📍 ${product.retailer}\n`;
+      });
+    } else {
+      // Fallback to retailer-specific suggestions
+      for (const [retailer, products] of Object.entries(retailers)) {
+        if (products.length > 0) {
+          message += `\n*${retailer.charAt(0).toUpperCase() + retailer.slice(1)}:*\n`;
+          
+          products.forEach((product, index) => {
+            const priceDisplay = product.price === 'N/A' ? 'N/A' : `₹${product.price}`;
+            const deliveryDisplay = product.delivery_time === 'N/A' ? 'N/A' : product.delivery_time;
+            const stockStatus = product.in_stock ? '✅' : '❌ Out of Stock';
+            message += `${index + 1}. ${product.name} - ${priceDisplay} (${deliveryDisplay}) ${stockStatus}\n`;
+          });
+        }
       }
     }
     
@@ -371,9 +392,9 @@ async function sendProductSuggestions(from, suggestions) {
   }
 
   message += "To select products, reply with:\n";
-  message += "• 'Zepto 1 for milk' - Select 1st Zepto option for milk\n";
-  message += "• 'Blinkit 2 for bread' - Select 2nd Blinkit option for bread\n";
-  message += "• 'All Zepto' - Select 1st Zepto option for all items\n";
+  message += "• '1 for chips' - Select 1st option for chips\n";
+  message += "• '2 for milk' - Select 2nd option for milk\n";
+  message += "• 'All 1' - Select 1st option for all items\n";
   message += "• 'Show cart' - View your current cart\n";
   message += "• 'Checkout' - Complete your order";
 
@@ -456,27 +477,43 @@ async function handleProductSelection(from, user, parsedIntent) {
     
     // Process user selections
     for (const [itemName, choice] of Object.entries(parsedIntent.choices)) {
-      const retailer = choice.retailer;
       const productNumber = choice.productNumber;
+      const specifiedRetailer = choice.retailer;
       
-      if (productSuggestions[itemName] && productSuggestions[itemName][retailer.toLowerCase()]) {
-        const products = productSuggestions[itemName][retailer.toLowerCase()];
-        const selectedProduct = products[productNumber - 1]; // Convert to 0-based index
-        
-        if (selectedProduct) {
+      // Get mixed suggestions for this item
+      const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName);
+      const selectedProduct = mixedSuggestions[productNumber - 1]; // Convert to 0-based index
+      
+      if (selectedProduct) {
+        // If specific retailer was mentioned, verify it matches
+        if (specifiedRetailer && selectedProduct.retailer !== specifiedRetailer) {
+          // Find the specified retailer's product at that number
+          const retailerSuggestions = await cartService.getProductSuggestions(cart.id);
+          if (retailerSuggestions[itemName] && retailerSuggestions[itemName][specifiedRetailer.toLowerCase()]) {
+            const retailerProducts = retailerSuggestions[itemName][specifiedRetailer.toLowerCase()];
+            const retailerProduct = retailerProducts[productNumber - 1];
+            if (retailerProduct) {
+              await cartService.updateCartItemWithProduct(cart.id, itemName, retailerProduct);
+              await whatsappService.sendMessage(
+                from,
+                `✅ Selected: ${retailerProduct.name} (${specifiedRetailer}) - ₹${retailerProduct.price}`
+              );
+            }
+          }
+        } else {
           // Update cart item with selected product details
           await cartService.updateCartItemWithProduct(cart.id, itemName, selectedProduct);
           
           await whatsappService.sendMessage(
             from,
-            `✅ Selected: ${selectedProduct.name} (${retailer}) - ₹${selectedProduct.price}`
-          );
-        } else {
-          await whatsappService.sendMessage(
-            from,
-            `❌ Product ${productNumber} not found for ${itemName} on ${retailer}`
+            `✅ Selected: ${selectedProduct.name} (${selectedProduct.retailer}) - ₹${selectedProduct.price}`
           );
         }
+      } else {
+        await whatsappService.sendMessage(
+          from,
+          `❌ Product ${productNumber} not found for ${itemName}`
+        );
       }
     }
     

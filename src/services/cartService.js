@@ -569,6 +569,45 @@ class CartService {
       throw error;
     }
   }
+
+  /**
+   * Get mixed product suggestions from all retailers for a specific item
+   * @param {string} itemName - Item name
+   * @returns {Promise<Array>} - Mixed product suggestions from all retailers
+   */
+  async getMixedProductSuggestions(itemName) {
+    try {
+      const retailers = ['zepto', 'blinkit', 'instamart'];
+      const allSuggestions = [];
+      
+      for (const retailer of retailers) {
+        try {
+          const retailerSuggestions = await aiService.scrapeProductSuggestions(itemName, retailer);
+          retailerSuggestions.forEach(suggestion => {
+            allSuggestions.push({
+              ...suggestion,
+              retailer: retailer.charAt(0).toUpperCase() + retailer.slice(1)
+            });
+          });
+        } catch (error) {
+          console.error(`❌ Error getting ${retailer} suggestions for ${itemName}:`, error);
+        }
+      }
+      
+      // Sort by price (lowest first) and limit to top 6 suggestions
+      allSuggestions.sort((a, b) => {
+        if (a.price === 'N/A' && b.price === 'N/A') return 0;
+        if (a.price === 'N/A') return 1;
+        if (b.price === 'N/A') return -1;
+        return a.price - b.price;
+      });
+      
+      return allSuggestions.slice(0, 6);
+    } catch (error) {
+      console.error('❌ Error getting mixed product suggestions:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new CartService(); 

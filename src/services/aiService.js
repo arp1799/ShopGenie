@@ -201,11 +201,11 @@ Only return valid JSON.`
     }
 
     // Check for add item intent
-    if (lowerMessage.includes('add') || lowerMessage.includes('include') || lowerMessage.includes('more')) {
+    if (lowerMessage.startsWith('add') || lowerMessage.includes('add') || lowerMessage.includes('include') || lowerMessage.includes('more')) {
       return {
         intent: 'add_item',
         items: this.extractItemsFromText(message),
-        confidence: 0.8
+        confidence: 0.9
       };
     }
 
@@ -277,9 +277,10 @@ Only return valid JSON.`
       };
     }
 
-    // Check for product selection (e.g., "Zepto 1 for milk", "Blinkit 2 for bread")
-    if ((lowerMessage.includes('zepto') || lowerMessage.includes('blinkit') || lowerMessage.includes('instamart')) && 
-        (/\d/.test(lowerMessage) && lowerMessage.includes('for'))) {
+    // Check for product selection (e.g., "1 for milk", "2 for bread", "Zepto 1 for milk")
+    if ((/\d/.test(lowerMessage) && lowerMessage.includes('for')) || 
+        ((lowerMessage.includes('zepto') || lowerMessage.includes('blinkit') || lowerMessage.includes('instamart')) && 
+         /\d/.test(lowerMessage) && lowerMessage.includes('for'))) {
       return {
         intent: 'product_selection',
         choices: this.extractProductChoices(message),
@@ -312,29 +313,29 @@ Only return valid JSON.`
     const choices = {};
     const lowerMessage = message.toLowerCase();
     
-    // Extract retailer-item pairs with product numbers
-    const retailers = ['zepto', 'blinkit', 'instamart'];
+    // Extract items from the message
     const items = this.extractItemsFromText(message);
+    
+    // Extract product number (e.g., "1", "2", "3")
+    const numberMatch = lowerMessage.match(/(\d+)/);
+    const productNumber = numberMatch ? parseInt(numberMatch[1]) : 1;
+    
+    // Check if specific retailer is mentioned
+    const retailers = ['zepto', 'blinkit', 'instamart'];
+    let specifiedRetailer = null;
     
     retailers.forEach(retailer => {
       if (lowerMessage.includes(retailer)) {
-        // Find items mentioned near this retailer
-        const retailerIndex = lowerMessage.indexOf(retailer);
-        const nearbyText = lowerMessage.substring(Math.max(0, retailerIndex - 50), retailerIndex + 50);
-        
-        // Extract product number (e.g., "1", "2", "3")
-        const numberMatch = nearbyText.match(/(\d+)/);
-        const productNumber = numberMatch ? parseInt(numberMatch[1]) : 1;
-        
-        items.forEach(item => {
-          if (nearbyText.includes(item.name)) {
-            choices[item.name] = {
-              retailer: retailer.charAt(0).toUpperCase() + retailer.slice(1),
-              productNumber: productNumber
-            };
-          }
-        });
+        specifiedRetailer = retailer.charAt(0).toUpperCase() + retailer.slice(1);
       }
+    });
+    
+    // Map items to choices
+    items.forEach(item => {
+      choices[item.name] = {
+        productNumber: productNumber,
+        retailer: specifiedRetailer // Will be null if no specific retailer mentioned
+      };
     });
     
     return choices;
@@ -423,7 +424,7 @@ Only return valid JSON.`
       }
       
       // Then try single word items
-      const simpleItems = text.match(/\b(milk|bread|eggs|tomatoes|onions|potatoes|rice|sugar|salt|oil|butter|cheese|yogurt|fruits|vegetables|apple|banana|orange|mango|grapes|carrot|cucumber|lettuce|spinach|chicken|fish|meat|paneer|tofu|noodles|pasta|sauce|ketchup|mayonnaise|jam|honey|chocolate|biscuits|cookies|cake|ice cream|juice|soda|water|tea|coffee)\b/gi);
+      const simpleItems = text.match(/\b(milk|bread|eggs|tomatoes|onions|potatoes|rice|sugar|salt|oil|butter|cheese|yogurt|fruits|vegetables|apple|banana|orange|mango|grapes|carrot|cucumber|lettuce|spinach|chicken|fish|meat|paneer|tofu|noodles|pasta|sauce|ketchup|mayonnaise|jam|honey|chocolate|biscuits|cookies|cake|ice cream|juice|soda|water|tea|coffee|chips|snacks|wafers|nuts|almonds|cashews|raisins|dates|prunes|dried fruits|fresh fruits|fresh vegetables|frozen vegetables|frozen fruits|ice cream|chocolate|candy|sweets|biscuits|cookies|crackers|namkeen|mixture|chivda|sev|papad|pickle|chutney|sauce|ketchup|mayonnaise|mustard|vinegar|oil|ghee|butter|cheese|paneer|tofu|meat|chicken|fish|eggs|milk|curd|yogurt|bread|roti|naan|paratha|rice|dal|lentils|pulses|flour|atta|maida|sugar|salt|spices|masala|tea|coffee|juice|soda|water|beverages|drinks)\b/gi);
       if (simpleItems) {
         simpleItems.forEach(item => {
           // Skip if already added as multi-word item
@@ -1444,6 +1445,16 @@ Only return valid JSON.`
         { name: 'Amul Masti Dahi 400g', price: 25 },
         { name: 'Nestle A+ Curd 400g', price: 28 },
         { name: 'Mother Dairy Curd 400g', price: 22 }
+      ],
+      'chips': [
+        { name: 'Lay\'s Classic Salted 30g', price: 20 },
+        { name: 'Kurkure Chilli Chatka 30g', price: 18 },
+        { name: 'Pringles Original 110g', price: 95 }
+      ],
+      'snacks': [
+        { name: 'Haldiram\'s Mixture 150g', price: 45 },
+        { name: 'Bikaji Bhujia 200g', price: 35 },
+        { name: 'Kurkure Chilli Chatka 30g', price: 18 }
       ]
     };
     
