@@ -130,6 +130,8 @@ async function processMessage(from, message, messageSid, messageType) {
       await handleShowCartIntent(from, user);
     } else if (parsedIntent.intent === 'address_confirmation') {
       await handleAddressConfirmation(from, user, parsedIntent);
+    } else if (parsedIntent.intent === 'product_selection') {
+      await handleProductSelection(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'retailer_selection') {
       await handleRetailerSelection(from, user, parsedIntent);
     } else {
@@ -188,11 +190,11 @@ async function handleOrderIntent(from, user, parsedIntent) {
     // Add items to cart with proper duplicate handling
     await cartService.addItemsToCart(cart.id, parsedIntent.items);
 
-    // Get price comparisons
-    const priceComparisons = await cartService.getPriceComparisons(cart.id);
+    // Get product suggestions
+    const productSuggestions = await cartService.getProductSuggestions(cart.id);
     
-    // Send price comparison message
-    await sendPriceComparison(from, priceComparisons);
+    // Send product suggestions message
+    await sendProductSuggestions(from, productSuggestions);
 
   } catch (error) {
     console.error('❌ Error handling order intent:', error);
@@ -346,6 +348,38 @@ Reply with:
   await whatsappService.sendMessage(from, message);
 }
 
+// Send product suggestions
+async function sendProductSuggestions(from, suggestions) {
+  let message = "🛒 *Product Suggestions:*\n\n";
+  
+  for (const [itemName, retailers] of Object.entries(suggestions)) {
+    message += `*${itemName}*\n`;
+    
+    for (const [retailer, products] of Object.entries(retailers)) {
+      if (products.length > 0) {
+        message += `\n*${retailer.charAt(0).toUpperCase() + retailer.slice(1)}:*\n`;
+        
+        products.forEach((product, index) => {
+          const priceDisplay = product.price === 'N/A' ? 'N/A' : `₹${product.price}`;
+          const deliveryDisplay = product.delivery_time === 'N/A' ? 'N/A' : product.delivery_time;
+          message += `${index + 1}. ${product.name} - ${priceDisplay} (${deliveryDisplay})\n`;
+        });
+      }
+    }
+    
+    message += "\n";
+  }
+
+  message += "To select products, reply with:\n";
+  message += "• 'Zepto 1 for milk' - Select 1st Zepto option for milk\n";
+  message += "• 'Blinkit 2 for bread' - Select 2nd Blinkit option for bread\n";
+  message += "• 'All Zepto' - Select 1st Zepto option for all items\n";
+  message += "• 'Show cart' - View your current cart\n";
+  message += "• 'Checkout' - Complete your order";
+
+  await whatsappService.sendMessage(from, message);
+}
+
 // Send price comparison
 async function sendPriceComparison(from, comparisons) {
   let message = "🛒 *Price Comparison:*\n\n";
@@ -405,6 +439,53 @@ async function sendFinalCartSummary(from, finalCart) {
       from,
       `🛒 ${retailer}: ${link}`
     );
+  }
+}
+
+// Handle product selection
+async function handleProductSelection(from, user, parsedIntent) {
+  try {
+    const cart = await cartService.getActiveCart(user.id);
+    if (!cart) {
+      await whatsappService.sendMessage(from, "🛒 Your cart is empty. Start by saying 'Order [items]'");
+      return;
+    }
+
+    // Get current product suggestions
+    const productSuggestions = await cartService.getProductSuggestions(cart.id);
+    
+    // Process user selections
+    for (const [itemName, choice] of Object.entries(parsedIntent.choices)) {
+      const retailer = choice.retailer;
+      const productNumber = choice.productNumber;
+      
+      if (productSuggestions[itemName] && productSuggestions[itemName][retailer.toLowerCase()]) {
+        const products = productSuggestions[itemName][retailer.toLowerCase()];
+        const selectedProduct = products[productNumber - 1]; // Convert to 0-based index
+        
+        if (selectedProduct) {
+          // Update cart item with selected product details
+          await cartService.updateCartItemWithProduct(cart.id, itemName, selectedProduct);
+          
+          await whatsappService.sendMessage(
+            from,
+            `✅ Selected: ${selectedProduct.name} (${retailer}) - ₹${selectedProduct.price}`
+          );
+        } else {
+          await whatsappService.sendMessage(
+            from,
+            `❌ Product ${productNumber} not found for ${itemName} on ${retailer}`
+          );
+        }
+      }
+    }
+    
+    // Show updated cart
+    await handleShowCartIntent(from, user);
+    
+  } catch (error) {
+    console.error('❌ Error handling product selection:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
   }
 }
 

@@ -229,6 +229,42 @@ class CartService {
   }
 
   /**
+   * Update cart item with selected product details
+   * @param {number} cartId - Cart ID
+   * @param {string} itemName - Item name
+   * @param {Object} selectedProduct - Selected product details
+   * @returns {Promise<Object>} - Updated cart item
+   */
+  async updateCartItemWithProduct(cartId, itemName, selectedProduct) {
+    try {
+      // Update the cart item with selected product details
+      const result = await query(
+        `UPDATE cart_items 
+         SET product_name = $1, 
+             normalized_name = $2,
+             notes = $3,
+             query = $4
+         WHERE cart_id = $5 AND LOWER(product_name) = LOWER($6)
+         RETURNING *`,
+        [
+          selectedProduct.name,
+          selectedProduct.name,
+          `Selected from ${selectedProduct.retailer} - ₹${selectedProduct.price}`,
+          `${selectedProduct.name} from ${selectedProduct.retailer}`,
+          cartId,
+          itemName
+        ]
+      );
+      
+      console.log(`✅ Updated cart item with selected product: ${selectedProduct.name}`);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Error updating cart item with product:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get price comparisons for cart items
    * @param {number} cartId - Cart ID
    * @returns {Promise<Array>} - Array of price comparisons
@@ -496,6 +532,40 @@ class CartService {
       return result.rows[0];
     } catch (error) {
       console.error('❌ Error closing cart:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get product suggestions for items in cart
+   * @param {number} cartId - Cart ID
+   * @returns {Promise<Object>} - Product suggestions organized by item
+   */
+  async getProductSuggestions(cartId) {
+    try {
+      const cartItems = await this.getCartItemsCombined(cartId);
+      const suggestions = {};
+      
+      for (const item of cartItems) {
+        const itemName = item.product_name;
+        const retailers = ['zepto', 'blinkit', 'instamart'];
+        
+        suggestions[itemName] = {};
+        
+        for (const retailer of retailers) {
+          try {
+            const retailerSuggestions = await aiService.scrapeProductSuggestions(itemName, retailer);
+            suggestions[itemName][retailer] = retailerSuggestions;
+          } catch (error) {
+            console.error(`❌ Error getting ${retailer} suggestions for ${itemName}:`, error);
+            suggestions[itemName][retailer] = [];
+          }
+        }
+      }
+      
+      return suggestions;
+    } catch (error) {
+      console.error('❌ Error getting product suggestions:', error);
       throw error;
     }
   }
