@@ -130,6 +130,8 @@ async function processMessage(from, message, messageSid, messageType) {
       await handleShowCartIntent(from, user);
     } else if (parsedIntent.intent === 'address_confirmation') {
       await handleAddressConfirmation(from, user, parsedIntent);
+    } else if (parsedIntent.intent === 'authentication') {
+      await handleAuthenticationIntent(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'product_selection') {
       await handleProductSelection(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'retailer_selection') {
@@ -191,7 +193,7 @@ async function handleOrderIntent(from, user, parsedIntent) {
     await cartService.addItemsToCart(cart.id, parsedIntent.items);
 
     // Get product suggestions
-    const productSuggestions = await cartService.getProductSuggestions(cart.id);
+    const productSuggestions = await cartService.getProductSuggestions(cart.id, user.id);
     
     // Send product suggestions message
     await sendProductSuggestions(from, productSuggestions);
@@ -360,7 +362,7 @@ async function sendProductSuggestions(from, suggestions) {
     message += `*${itemName}*\n`;
     
     // Get mixed suggestions from all retailers for this item
-    const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName);
+    const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName, user.id);
     
     if (mixedSuggestions.length > 0) {
       message += "\n*Best Options (All Retailers):*\n";
@@ -463,6 +465,51 @@ async function sendFinalCartSummary(from, finalCart) {
   }
 }
 
+// Handle authentication intent
+async function handleAuthenticationIntent(from, user, parsedIntent) {
+  try {
+    const authService = require('../services/authService');
+    const retailer = parsedIntent.retailer;
+    
+    if (!retailer) {
+      await whatsappService.sendMessage(
+        from,
+        "🔐 Please specify which retailer to connect:\n\n" +
+        "• 'Login Zepto' - Connect your Zepto account\n" +
+        "• 'Login Blinkit' - Connect your Blinkit account\n" +
+        "• 'Login Instamart' - Connect your Swiggy Instamart account"
+      );
+      return;
+    }
+
+    // Check if user already has credentials for this retailer
+    const hasCredentials = await authService.hasRetailerCredentials(user.id, retailer);
+    
+    if (hasCredentials) {
+      await whatsappService.sendMessage(
+        from,
+        `✅ You're already connected to ${retailer.charAt(0).toUpperCase() + retailer.slice(1)}!\n\n` +
+        "To update credentials, send:\n" +
+        `'Update ${retailer} email@example.com password'`
+      );
+      return;
+    }
+
+    // Start authentication flow
+    await whatsappService.sendMessage(
+      from,
+      `🔐 Let's connect your ${retailer.charAt(0).toUpperCase() + retailer.slice(1)} account!\n\n` +
+      `Send your ${retailer} login details in this format:\n` +
+      `'${retailer} email@example.com password'\n\n` +
+      "Your password will be encrypted and stored securely."
+    );
+
+  } catch (error) {
+    console.error('❌ Error handling authentication intent:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
 // Handle product selection
 async function handleProductSelection(from, user, parsedIntent) {
   try {
@@ -473,15 +520,15 @@ async function handleProductSelection(from, user, parsedIntent) {
     }
 
     // Get current product suggestions
-    const productSuggestions = await cartService.getProductSuggestions(cart.id);
+    const productSuggestions = await cartService.getProductSuggestions(cart.id, user.id);
     
     // Process user selections
     for (const [itemName, choice] of Object.entries(parsedIntent.choices)) {
       const productNumber = choice.productNumber;
       const specifiedRetailer = choice.retailer;
       
-      // Get mixed suggestions for this item
-      const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName);
+             // Get mixed suggestions for this item
+       const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName, user.id);
       const selectedProduct = mixedSuggestions[productNumber - 1]; // Convert to 0-based index
       
       if (selectedProduct) {

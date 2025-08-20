@@ -539,9 +539,10 @@ class CartService {
   /**
    * Get product suggestions for items in cart
    * @param {number} cartId - Cart ID
+   * @param {number} userId - User ID for authentication
    * @returns {Promise<Object>} - Product suggestions organized by item
    */
-  async getProductSuggestions(cartId) {
+  async getProductSuggestions(cartId, userId = null) {
     try {
       const cartItems = await this.getCartItemsCombined(cartId);
       const suggestions = {};
@@ -554,7 +555,7 @@ class CartService {
         
         for (const retailer of retailers) {
           try {
-            const retailerSuggestions = await aiService.scrapeProductSuggestions(itemName, retailer);
+            const retailerSuggestions = await aiService.scrapeProductSuggestions(itemName, retailer, userId);
             suggestions[itemName][retailer] = retailerSuggestions;
           } catch (error) {
             console.error(`❌ Error getting ${retailer} suggestions for ${itemName}:`, error);
@@ -573,16 +574,17 @@ class CartService {
   /**
    * Get mixed product suggestions from all retailers for a specific item
    * @param {string} itemName - Item name
+   * @param {number} userId - User ID for authentication
    * @returns {Promise<Array>} - Mixed product suggestions from all retailers
    */
-  async getMixedProductSuggestions(itemName) {
+  async getMixedProductSuggestions(itemName, userId = null) {
     try {
       const retailers = ['zepto', 'blinkit', 'instamart'];
       const allSuggestions = [];
       
       for (const retailer of retailers) {
         try {
-          const retailerSuggestions = await aiService.scrapeProductSuggestions(itemName, retailer);
+          const retailerSuggestions = await aiService.scrapeProductSuggestions(itemName, retailer, userId);
           retailerSuggestions.forEach(suggestion => {
             allSuggestions.push({
               ...suggestion,

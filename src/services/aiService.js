@@ -277,6 +277,16 @@ Only return valid JSON.`
       };
     }
 
+    // Check for authentication intent (e.g., "login zepto", "connect blinkit", "auth instamart")
+    if (lowerMessage.includes('login') || lowerMessage.includes('connect') || lowerMessage.includes('auth') || 
+        lowerMessage.includes('sign in') || lowerMessage.includes('signin')) {
+      return {
+        intent: 'authentication',
+        retailer: this.extractRetailerFromAuth(message),
+        confidence: 0.9
+      };
+    }
+
     // Check for product selection (e.g., "1 for milk", "2 for bread", "Zepto 1 for milk")
     if ((/\d/.test(lowerMessage) && lowerMessage.includes('for')) || 
         ((lowerMessage.includes('zepto') || lowerMessage.includes('blinkit') || lowerMessage.includes('instamart')) && 
@@ -302,6 +312,24 @@ Only return valid JSON.`
       intent: 'unknown',
       confidence: 0.3
     };
+  }
+
+  /**
+   * Extract retailer from authentication message
+   * @param {string} message - User message
+   * @returns {string|null} - Retailer name or null
+   */
+  extractRetailerFromAuth(message) {
+    const lowerMessage = message.toLowerCase();
+    const retailers = ['zepto', 'blinkit', 'instamart', 'swiggy'];
+    
+    for (const retailer of retailers) {
+      if (lowerMessage.includes(retailer)) {
+        return retailer;
+      }
+    }
+    
+    return null;
   }
 
   /**
@@ -1085,9 +1113,10 @@ Only return valid JSON.`
    * Scrape product suggestions from retailer websites
    * @param {string} itemName - Base item name (e.g., "butter")
    * @param {string} retailer - Retailer name
+   * @param {number} userId - User ID for authentication
    * @returns {Promise<Array>} - Array of product suggestions
    */
-  async scrapeProductSuggestions(itemName, retailer) {
+  async scrapeProductSuggestions(itemName, retailer, userId = null) {
     try {
       console.log(`🔍 Scraping ${retailer} suggestions for: ${itemName}`);
       
@@ -1095,13 +1124,13 @@ Only return valid JSON.`
       
       switch (retailer.toLowerCase()) {
         case 'zepto':
-          suggestions = await this.scrapeZeptoSuggestions(itemName);
+          suggestions = await this.scrapeZeptoSuggestions(itemName, userId);
           break;
         case 'blinkit':
-          suggestions = await this.scrapeBlinkitSuggestions(itemName);
+          suggestions = await this.scrapeBlinkitSuggestions(itemName, userId);
           break;
         case 'instamart':
-          suggestions = await this.scrapeInstamartSuggestions(itemName);
+          suggestions = await this.scrapeInstamartSuggestions(itemName, userId);
           break;
         default:
           suggestions = this.getRealisticProductSuggestions(itemName, retailer);
@@ -1118,9 +1147,10 @@ Only return valid JSON.`
   /**
    * Scrape product suggestions from Zepto
    * @param {string} itemName - Item name
+   * @param {number} userId - User ID for authentication
    * @returns {Promise<Array>} - Product suggestions
    */
-  async scrapeZeptoSuggestions(itemName) {
+  async scrapeZeptoSuggestions(itemName, userId = null) {
     try {
       const searchUrl = `https://www.zepto.in/search?q=${encodeURIComponent(itemName)}`;
       

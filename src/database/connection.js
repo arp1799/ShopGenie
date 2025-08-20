@@ -171,6 +171,31 @@ async function initializeTables() {
       console.log('✅ Added deep_links column to carts table');
     }
 
+    // Create retailer_credentials table if it doesn't exist
+    const retailerCredentialsExists = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'retailer_credentials'
+      );
+    `);
+
+    if (!retailerCredentialsExists.rows[0].exists) {
+      await client.query(`
+        CREATE TABLE retailer_credentials (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id),
+          retailer VARCHAR(50) NOT NULL,
+          email VARCHAR(255) NOT NULL,
+          encrypted_password TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          UNIQUE(user_id, retailer)
+        );
+      `);
+      console.log('✅ Created retailer_credentials table');
+    }
+
     // Create indexes for better performance
     await client.query('CREATE INDEX IF NOT EXISTS idx_users_phone_number ON users(phone_number)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_addresses_user_id ON addresses(user_id)');
@@ -179,6 +204,8 @@ async function initializeTables() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_price_quotes_cart_item_id ON price_quotes(cart_item_id)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_messages_log_user_id ON messages_log(user_id)');
     await client.query('CREATE INDEX IF NOT EXISTS idx_messages_log_created_at ON messages_log(created_at)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_retailer_credentials_user_id ON retailer_credentials(user_id)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_retailer_credentials_retailer ON retailer_credentials(retailer)');
     
     client.release();
     
