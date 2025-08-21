@@ -139,6 +139,12 @@ async function processMessage(from, message, messageSid, messageType) {
       }
     }
     
+    // Clear any stale session data if no active auth flow
+    if (userSession.auth_flow && !userSession.auth_step) {
+      console.log(`🧹 [SESSION] Clearing stale session data for user ${user.id}`);
+      await userService.updateUserSession(user.id, {});
+    }
+    
     // Authentication commands
     if (lowerMessage.startsWith('login ')) {
       const retailer = lowerMessage.replace('login ', '').trim();
@@ -166,6 +172,13 @@ async function processMessage(from, message, messageSid, messageType) {
     // Resend OTP command
     if (lowerMessage === 'resend otp' || lowerMessage === 'resend') {
       await handleResendOTP(from, user);
+      return;
+    }
+    
+    // Clear session command
+    if (lowerMessage === 'clear session' || lowerMessage === 'reset') {
+      await userService.updateUserSession(user.id, {});
+      await whatsappService.sendMessage(from, "🔄 Session cleared! You can start fresh now.");
       return;
     }
     
