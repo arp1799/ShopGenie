@@ -231,6 +231,16 @@ async function initializeTables() {
         
         console.log('✅ Successfully migrated retailer_credentials table');
       }
+      
+      // If email column still exists and has NOT NULL constraint, make it nullable
+      if (retailerCredentialsColumnNames.includes('email')) {
+        try {
+          await client.query('ALTER TABLE retailer_credentials ALTER COLUMN email DROP NOT NULL');
+          console.log('✅ Made email column nullable');
+        } catch (error) {
+          console.log('ℹ️ Email column already nullable or constraint already dropped');
+        }
+      }
     }
 
     // Create indexes for better performance

@@ -163,6 +163,12 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
     
+    // Resend OTP command
+    if (lowerMessage === 'resend otp' || lowerMessage === 'resend') {
+      await handleResendOTP(from, user);
+      return;
+    }
+    
     if (lowerMessage === 'connected retailers' || lowerMessage === 'show connected' || lowerMessage === 'my retailers') {
       await handleShowConnectedRetailers(from, user);
       return;
@@ -1173,6 +1179,41 @@ async function handlePasswordInput(from, user, password) {
     
   } catch (error) {
     console.error('❌ [PASSWORD_INPUT] Error handling password input:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle resend OTP
+async function handleResendOTP(from, user) {
+  try {
+    console.log(`📱 [RESEND_OTP] User ${user.id} requested OTP resend`);
+    
+    const userSession = await userService.getUserSession(user.id);
+    
+    if (userSession.auth_flow !== 'phone_login' || userSession.auth_step !== 'otp_input') {
+      await whatsappService.sendMessage(
+        from,
+        "❌ No active OTP request found.\n\n" +
+        "Please start the login process again:\n" +
+        "'Login Zepto'"
+      );
+      return;
+    }
+    
+    // Generate new OTP
+    const newOtp = Math.floor(100000 + Math.random() * 900000); // 6-digit OTP
+    
+    await whatsappService.sendMessage(
+      from,
+      `📱 *New OTP Sent!*\n\n` +
+      `A new 6-digit OTP has been sent to ${userSession.phone_number}\n\n` +
+      `Enter the OTP code:`
+    );
+    
+    console.log(`📱 [OTP] Generated new OTP for ${userSession.phone_number}: ${newOtp}`);
+    
+  } catch (error) {
+    console.error('❌ [RESEND_OTP] Error handling OTP resend:', error);
     await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
   }
 }
