@@ -195,6 +195,37 @@ async function initializeTables() {
         );
       `);
       console.log('✅ Created retailer_credentials table');
+    } else {
+      // Check if the table needs to be updated (migration from old schema)
+      const retailerCredentialsColumns = await client.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'retailer_credentials' 
+        AND table_schema = 'public'
+      `);
+      
+      const retailerCredentialsColumnNames = retailerCredentialsColumns.rows.map(row => row.column_name);
+      
+      // Check if login_id column exists, if not, add it
+      if (!retailerCredentialsColumnNames.includes('login_id')) {
+        console.log('🔄 Migrating retailer_credentials table to new schema...');
+        
+        // Add login_id column
+        await client.query('ALTER TABLE retailer_credentials ADD COLUMN login_id VARCHAR(255)');
+        
+        // Copy data from email column to login_id if email column exists
+        if (retailerCredentialsColumnNames.includes('email')) {
+          await client.query('UPDATE retailer_credentials SET login_id = email WHERE login_id IS NULL');
+          console.log('✅ Migrated email data to login_id column');
+        }
+        
+        // Add login_type column if it doesn't exist
+        if (!retailerCredentialsColumnNames.includes('login_type')) {
+          await client.query('ALTER TABLE retailer_credentials ADD COLUMN login_type VARCHAR(20) DEFAULT \'email\'');
+        }
+        
+        console.log('✅ Successfully migrated retailer_credentials table');
+      }
     }
 
     // Create indexes for better performance

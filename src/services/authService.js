@@ -144,7 +144,18 @@ class AuthService {
       const credentials = await this.getRetailerCredentials(userId, retailer);
       return credentials !== null;
     } catch (error) {
-      console.error(`❌ Error checking ${retailer} credentials:`, error);
+      console.error(`❌ [AUTH] Error checking ${retailer} credentials:`, error);
+      
+      // If it's a schema error, return false instead of throwing
+      if (error.message && (
+        error.message.includes('login_id') || 
+        error.message.includes('login_type') ||
+        error.message.includes('retailer_credentials')
+      )) {
+        console.log('🔐 [AUTH] Schema error detected, returning false for credentials check');
+        return false;
+      }
+      
       return false;
     }
   }
@@ -164,6 +175,17 @@ class AuthService {
       return result.rows;
     } catch (error) {
       console.error('❌ [AUTH] Error getting all retailer credentials:', error);
+      
+      // If it's a schema error, return empty array instead of throwing
+      if (error.message && (
+        error.message.includes('login_id') || 
+        error.message.includes('login_type') ||
+        error.message.includes('retailer_credentials')
+      )) {
+        console.log('🔐 [AUTH] Schema error detected, returning empty credentials array');
+        return [];
+      }
+      
       throw error;
     }
   }

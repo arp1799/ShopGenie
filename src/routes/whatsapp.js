@@ -153,10 +153,29 @@ async function processMessage(from, message, messageSid, messageType) {
 
   } catch (error) {
     console.error('❌ Error processing message:', error);
-    await whatsappService.sendMessage(
-      from,
-      "😔 Sorry, I encountered an error. Please try again or type 'help' for assistance."
-    );
+    
+    // Check if it's an authentication-related error (schema issue)
+    if (error.message && (
+      error.message.includes('login_id') || 
+      error.message.includes('login_type') ||
+      error.message.includes('retailer_credentials')
+    )) {
+      console.log('🔐 [ERROR] Authentication table schema issue detected, redirecting to setup');
+      await whatsappService.sendMessage(
+        from,
+        "🔐 *Welcome to ShopGenie AI!*\n\n" +
+        "I need to set up your account first. Please connect your retailer accounts:\n\n" +
+        "• 'Login Zepto' - Connect Zepto account\n" +
+        "• 'Login Blinkit' - Connect Blinkit account\n" +
+        "• 'Login Instamart' - Connect Swiggy Instamart account\n\n" +
+        "This will help me get the best prices and availability for you!"
+      );
+    } else {
+      await whatsappService.sendMessage(
+        from,
+        "😔 Sorry, I encountered an error. Please try again or type 'help' for assistance."
+      );
+    }
   }
 }
 
