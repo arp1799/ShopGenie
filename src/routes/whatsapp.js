@@ -236,6 +236,27 @@ async function handleOrderIntent(from, user, parsedIntent) {
 // Handle add item intent
 async function handleAddItemIntent(from, user, parsedIntent) {
   try {
+    console.log(`🛒 [ADD_ITEM] Processing add item intent for user ${user.id}`);
+    
+    // Check if user has authenticated retailers
+    const authService = require('../services/authService');
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    
+    if (userCredentials.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🔐 *Please connect your retailer accounts first!*\n\n" +
+        "To get the best prices and availability, connect your accounts:\n\n" +
+        "• 'Login Zepto' - Connect Zepto account\n" +
+        "• 'Login Blinkit' - Connect Blinkit account\n" +
+        "• 'Login Instamart' - Connect Swiggy Instamart account\n\n" +
+        "This will help me access your personalized pricing and delivery options."
+      );
+      return;
+    }
+    
+    console.log(`🔐 [ADD_ITEM] User has ${userCredentials.length} authenticated retailers: ${userCredentials.map(c => c.retailer).join(', ')}`);
+    
     const cart = await cartService.getActiveCart(user.id);
     if (!cart) {
       await whatsappService.sendMessage(
@@ -257,11 +278,11 @@ async function handleAddItemIntent(from, user, parsedIntent) {
     );
 
     // Show product suggestions for the newly added items
-    const productSuggestions = await cartService.getProductSuggestions(cart.id);
+    const productSuggestions = await cartService.getProductSuggestions(cart.id, user.id);
     await sendProductSuggestions(from, productSuggestions);
 
   } catch (error) {
-    console.error('❌ Error handling add item intent:', error);
+    console.error('❌ [ADD_ITEM] Error handling add item intent:', error);
     throw error;
   }
 }
@@ -314,6 +335,27 @@ async function handleAddressConfirmation(from, user, parsedIntent) {
 // Handle retailer selection
 async function handleRetailerSelection(from, user, parsedIntent) {
   try {
+    console.log(`🏪 [RETAILER_SELECTION] Processing retailer selection for user ${user.id}`);
+    
+    // Check if user has authenticated retailers
+    const authService = require('../services/authService');
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    
+    if (userCredentials.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🔐 *Please connect your retailer accounts first!*\n\n" +
+        "To get the best prices and availability, connect your accounts:\n\n" +
+        "• 'Login Zepto' - Connect Zepto account\n" +
+        "• 'Login Blinkit' - Connect Blinkit account\n" +
+        "• 'Login Instamart' - Connect Swiggy Instamart account\n\n" +
+        "This will help me access your personalized pricing and delivery options."
+      );
+      return;
+    }
+    
+    console.log(`🔐 [RETAILER_SELECTION] User has ${userCredentials.length} authenticated retailers: ${userCredentials.map(c => c.retailer).join(', ')}`);
+    
     const cart = await cartService.getActiveCart(user.id);
     if (!cart) {
       await whatsappService.sendMessage(
@@ -617,6 +659,27 @@ async function handleCredentialInput(from, user, parsedIntent) {
 // Handle product selection
 async function handleProductSelection(from, user, parsedIntent) {
   try {
+    console.log(`🛒 [PRODUCT_SELECTION] Processing product selection for user ${user.id}`);
+    
+    // Check if user has authenticated retailers
+    const authService = require('../services/authService');
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    
+    if (userCredentials.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🔐 *Please connect your retailer accounts first!*\n\n" +
+        "To get the best prices and availability, connect your accounts:\n\n" +
+        "• 'Login Zepto' - Connect Zepto account\n" +
+        "• 'Login Blinkit' - Connect Blinkit account\n" +
+        "• 'Login Instamart' - Connect Swiggy Instamart account\n\n" +
+        "This will help me access your personalized pricing and delivery options."
+      );
+      return;
+    }
+    
+    console.log(`🔐 [PRODUCT_SELECTION] User has ${userCredentials.length} authenticated retailers: ${userCredentials.map(c => c.retailer).join(', ')}`);
+    
     const cart = await cartService.getActiveCart(user.id);
     if (!cart) {
       await whatsappService.sendMessage(from, "🛒 Your cart is empty. Start by saying 'Order [items]'");
@@ -756,6 +819,48 @@ async function handleShowConnectedRetailers(from, user) {
   } catch (error) {
     console.error('❌ [RETAILERS] Error showing connected retailers:', error);
     await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle show prices intent
+async function handleShowPricesIntent(from, user) {
+  try {
+    console.log(`💰 [SHOW_PRICES] Processing show prices intent for user ${user.id}`);
+    
+    // Check if user has authenticated retailers
+    const authService = require('../services/authService');
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    
+    if (userCredentials.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🔐 *Please connect your retailer accounts first!*\n\n" +
+        "To get the best prices and availability, connect your accounts:\n\n" +
+        "• 'Login Zepto' - Connect Zepto account\n" +
+        "• 'Login Blinkit' - Connect Blinkit account\n" +
+        "• 'Login Instamart' - Connect Swiggy Instamart account\n\n" +
+        "This will help me access your personalized pricing and delivery options."
+      );
+      return;
+    }
+    
+    console.log(`🔐 [SHOW_PRICES] User has ${userCredentials.length} authenticated retailers: ${userCredentials.map(c => c.retailer).join(', ')}`);
+    
+    const cart = await cartService.getActiveCart(user.id);
+    if (!cart) {
+      await whatsappService.sendMessage(
+        from,
+        "🛒 You don't have an active cart. Start by saying 'Order [items]'"
+      );
+      return;
+    }
+
+    const priceComparisons = await cartService.getPriceComparisons(cart.id);
+    await sendPriceComparison(from, priceComparisons);
+
+  } catch (error) {
+    console.error('❌ [SHOW_PRICES] Error handling show prices intent:', error);
+    throw error;
   }
 }
 
