@@ -38,11 +38,12 @@ class AuthService {
    * Save user's retailer credentials
    * @param {number} userId - User ID
    * @param {string} retailer - Retailer name (zepto, blinkit, instamart)
-   * @param {string} email - User's email
+   * @param {string} loginId - User's email or phone number
    * @param {string} password - User's password (will be encrypted)
+   * @param {string} loginType - 'email' or 'phone'
    * @returns {Promise<Object>} - Saved credentials object
    */
-  async saveRetailerCredentials(userId, retailer, email, password) {
+  async saveRetailerCredentials(userId, retailer, loginId, password, loginType = 'email') {
     try {
       const encryptedPassword = this.encrypt(password);
       
@@ -56,22 +57,22 @@ class AuthService {
         // Update existing credentials
         const result = await query(
           `UPDATE retailer_credentials 
-           SET email = $1, encrypted_password = $2, updated_at = NOW()
-           WHERE user_id = $3 AND retailer = $4
+           SET login_id = $1, login_type = $2, encrypted_password = $3, updated_at = NOW()
+           WHERE user_id = $4 AND retailer = $5
            RETURNING *`,
-          [email, encryptedPassword, userId, retailer]
+          [loginId, loginType, encryptedPassword, userId, retailer]
         );
-        console.log(`✅ Updated ${retailer} credentials for user ${userId}`);
+        console.log(`🔐 [AUTH] Updated ${retailer} credentials for user ${userId} (${loginType}: ${loginId})`);
         return result.rows[0];
       } else {
         // Insert new credentials
         const result = await query(
-          `INSERT INTO retailer_credentials (user_id, retailer, email, encrypted_password)
-           VALUES ($1, $2, $3, $4)
+          `INSERT INTO retailer_credentials (user_id, retailer, login_id, login_type, encrypted_password)
+           VALUES ($1, $2, $3, $4, $5)
            RETURNING *`,
-          [userId, retailer, email, encryptedPassword]
+          [userId, retailer, loginId, loginType, encryptedPassword]
         );
-        console.log(`✅ Saved ${retailer} credentials for user ${userId}`);
+        console.log(`🔐 [AUTH] Saved ${retailer} credentials for user ${userId} (${loginType}: ${loginId})`);
         return result.rows[0];
       }
     } catch (error) {
@@ -99,7 +100,8 @@ class AuthService {
           id: credentials.id,
           user_id: credentials.user_id,
           retailer: credentials.retailer,
-          email: credentials.email,
+          login_id: credentials.login_id,
+          login_type: credentials.login_type,
           encrypted_password: credentials.encrypted_password,
           created_at: credentials.created_at,
           updated_at: credentials.updated_at
@@ -155,12 +157,13 @@ class AuthService {
   async getAllRetailerCredentials(userId) {
     try {
       const result = await query(
-        'SELECT retailer, email, created_at, updated_at FROM retailer_credentials WHERE user_id = $1',
+        'SELECT retailer, login_id, login_type, created_at, updated_at FROM retailer_credentials WHERE user_id = $1',
         [userId]
       );
+      console.log(`🔐 [AUTH] Retrieved ${result.rows.length} retailer credentials for user ${userId}`);
       return result.rows;
     } catch (error) {
-      console.error('❌ Error getting all retailer credentials:', error);
+      console.error('❌ [AUTH] Error getting all retailer credentials:', error);
       throw error;
     }
   }

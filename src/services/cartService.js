@@ -543,6 +543,7 @@ class CartService {
    * @returns {Promise<Object>} - Product suggestions organized by item
    */
   async getProductSuggestions(cartId, userId = null) {
+    console.log(`🛒 [CART] Getting product suggestions for cart ${cartId} (User: ${userId || 'anonymous'})`);
     try {
       const cartItems = await this.getCartItemsCombined(cartId);
       const suggestions = {};
@@ -553,12 +554,28 @@ class CartService {
         
         suggestions[itemName] = {};
         
+        // Get user's authenticated retailers
+        const authService = require('./authService');
+        const userCredentials = userId ? await authService.getAllRetailerCredentials(userId) : [];
+        const authenticatedRetailers = userCredentials.map(cred => cred.retailer);
+        
+        console.log(`🔐 [CART] User ${userId} has authenticated retailers: ${authenticatedRetailers.join(', ') || 'none'}`);
+        
         for (const retailer of retailers) {
           try {
-            const retailerSuggestions = await aiService.scrapeProductSuggestions(itemName, retailer, userId);
-            suggestions[itemName][retailer] = retailerSuggestions;
+            // Check if user is authenticated for this retailer
+            const isAuthenticated = authenticatedRetailers.includes(retailer);
+            
+            if (isAuthenticated) {
+              console.log(`🔐 [CART] Using authenticated session for ${retailer}`);
+              const retailerSuggestions = await aiService.scrapeProductSuggestions(itemName, retailer, userId);
+              suggestions[itemName][retailer] = retailerSuggestions;
+            } else {
+              console.log(`⚠️ [CART] User not authenticated for ${retailer}, skipping`);
+              suggestions[itemName][retailer] = [];
+            }
           } catch (error) {
-            console.error(`❌ Error getting ${retailer} suggestions for ${itemName}:`, error);
+            console.error(`❌ [CART] Error getting ${retailer} suggestions for ${itemName}:`, error);
             suggestions[itemName][retailer] = [];
           }
         }

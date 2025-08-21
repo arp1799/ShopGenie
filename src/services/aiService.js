@@ -22,7 +22,7 @@ class AIService {
    * @returns {Promise<Object>} - Parsed intent and data
    */
   async parseMessage(message) {
-    console.log(`🧠 Parsing message: ${message}`);
+    console.log(`🧠 [AI] Parsing message: "${message}"`);
 
     // Check if OpenAI is disabled (for free tier users)
     const openaiDisabled = process.env.DISABLE_OPENAI === 'true' || !process.env.OPENAI_API_KEY;
@@ -274,6 +274,19 @@ Only return valid JSON.`
         items: [],
         address: address,
         confidence: 0.9
+      };
+    }
+
+    // Check for credential input (e.g., "zepto user@example.com password", "blinkit +919876543210 password")
+    const credentialPattern = /^(zepto|blinkit|instamart)\s+([^\s]+)\s+(.+)$/i;
+    const credentialMatch = message.match(credentialPattern);
+    if (credentialMatch) {
+      return {
+        intent: 'credential_input',
+        retailer: credentialMatch[1].toLowerCase(),
+        login_id: credentialMatch[2],
+        password: credentialMatch[3],
+        confidence: 0.95
       };
     }
 
@@ -1118,7 +1131,7 @@ Only return valid JSON.`
    */
   async scrapeProductSuggestions(itemName, retailer, userId = null) {
     try {
-      console.log(`🔍 Scraping ${retailer} suggestions for: ${itemName}`);
+      console.log(`🔍 [SCRAPING] Starting ${retailer} suggestions for: "${itemName}" (User: ${userId || 'anonymous'})`);
       
       let suggestions = [];
       

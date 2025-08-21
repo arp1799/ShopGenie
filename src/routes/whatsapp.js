@@ -109,6 +109,12 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
 
+    // Check for connected retailers command
+    if (message.toLowerCase().includes('connected retailers') || message.toLowerCase().includes('show connected') || message.toLowerCase().includes('my retailers')) {
+      await handleShowConnectedRetailers(from, user);
+      return;
+    }
+
     // Handle location messages
     if (messageType === 'application/vnd.geo+json' || messageType === 'location') {
       await handleLocationMessage(from, user, message, messageSid);
@@ -132,6 +138,8 @@ async function processMessage(from, message, messageSid, messageType) {
       await handleAddressConfirmation(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'authentication') {
       await handleAuthenticationIntent(from, user, parsedIntent);
+    } else if (parsedIntent.intent === 'credential_input') {
+      await handleCredentialInput(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'product_selection') {
       await handleProductSelection(from, user, parsedIntent);
     } else if (parsedIntent.intent === 'retailer_selection') {
@@ -155,6 +163,27 @@ async function processMessage(from, message, messageSid, messageType) {
 // Handle order intent
 async function handleOrderIntent(from, user, parsedIntent) {
   try {
+    console.log(`🛒 [ORDER] Processing order intent for user ${user.id}`);
+    
+    // Check if user has authenticated retailers
+    const authService = require('../services/authService');
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    
+    if (userCredentials.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🔐 *Please connect your retailer accounts first!*\n\n" +
+        "To get the best prices and availability, connect your accounts:\n\n" +
+        "• 'Login Zepto' - Connect Zepto account\n" +
+        "• 'Login Blinkit' - Connect Blinkit account\n" +
+        "• 'Login Instamart' - Connect Swiggy Instamart account\n\n" +
+        "This will help me access your personalized pricing and delivery options."
+      );
+      return;
+    }
+    
+    console.log(`🔐 [ORDER] User has ${userCredentials.length} authenticated retailers: ${userCredentials.map(c => c.retailer).join(', ')}`);
+    
     // If order has address in it, handle that first
     if (parsedIntent.address) {
       const validatedAddress = await aiService.validateAddress(parsedIntent.address);
@@ -468,16 +497,31 @@ async function sendFinalCartSummary(from, finalCart) {
 // Handle authentication intent
 async function handleAuthenticationIntent(from, user, parsedIntent) {
   try {
+    console.log(`🔐 [AUTH] Handling authentication intent for user ${user.id}`);
+    
     const authService = require('../services/authService');
+    const { getSupportedRetailers, getRetailerByName } = require('../config/retailers');
     const retailer = parsedIntent.retailer;
     
     if (!retailer) {
+      const supportedRetailers = getSupportedRetailers();
+      const retailerList = supportedRetailers.map(r => `• 'Login ${r.displayName}' - ${r.description}`).join('\n');
+      
       await whatsappService.sendMessage(
         from,
-        "🔐 Please specify which retailer to connect:\n\n" +
-        "• 'Login Zepto' - Connect your Zepto account\n" +
-        "• 'Login Blinkit' - Connect your Blinkit account\n" +
-        "• 'Login Instamart' - Connect your Swiggy Instamart account"
+        `🔐 *Available Retailers:*\n\n${retailerList}\n\n` +
+        "Choose a retailer to connect your account!"
+      );
+      return;
+    }
+
+    // Check if retailer is supported
+    const retailerConfig = getRetailerByName(retailer);
+    if (!retailerConfig) {
+      await whatsappService.sendMessage(
+        from,
+        `❌ ${retailer.charAt(0).toUpperCase() + retailer.slice(1)} is not currently supported.\n\n` +
+        "Supported retailers: Zepto, Blinkit, Swiggy Instamart"
       );
       return;
     }
@@ -488,25 +532,85 @@ async function handleAuthenticationIntent(from, user, parsedIntent) {
     if (hasCredentials) {
       await whatsappService.sendMessage(
         from,
-        `✅ You're already connected to ${retailer.charAt(0).toUpperCase() + retailer.slice(1)}!\n\n` +
+        `✅ You're already connected to ${retailerConfig.displayName}!\n\n` +
         "To update credentials, send:\n" +
-        `'Update ${retailer} email@example.com password'`
+        `'Update ${retailer} login_id password'`
       );
       return;
     }
 
     // Start authentication flow
+    const loginMethods = retailerConfig.loginMethods.join(' or ');
     await whatsappService.sendMessage(
       from,
-      `🔐 Let's connect your ${retailer.charAt(0).toUpperCase() + retailer.slice(1)} account!\n\n` +
-      `Send your ${retailer} login details in this format:\n` +
-      `'${retailer} email@example.com password'\n\n` +
+      `🔐 Let's connect your ${retailerConfig.displayName} account!\n\n` +
+      `Send your ${retailerConfig.displayName} login details in this format:\n` +
+      `'${retailer} ${loginMethods} password'\n\n` +
+      "Examples:\n" +
+      `• '${retailer} user@example.com password123'\n` +
+      `• '${retailer} +919876543210 password123'\n\n` +
       "Your password will be encrypted and stored securely."
     );
 
   } catch (error) {
-    console.error('❌ Error handling authentication intent:', error);
+    console.error('❌ [AUTH] Error handling authentication intent:', error);
     await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle credential input
+async function handleCredentialInput(from, user, parsedIntent) {
+  try {
+    console.log(`🔐 [CREDENTIALS] Processing credential input for user ${user.id}`);
+    
+    const authService = require('../services/authService');
+    const { getRetailerByName } = require('../config/retailers');
+    
+    const { retailer, login_id, password } = parsedIntent;
+    
+    // Validate retailer
+    const retailerConfig = getRetailerByName(retailer);
+    if (!retailerConfig) {
+      await whatsappService.sendMessage(
+        from,
+        `❌ ${retailer.charAt(0).toUpperCase() + retailer.slice(1)} is not supported.`
+      );
+      return;
+    }
+    
+    // Determine login type (email or phone)
+    const isEmail = login_id.includes('@');
+    const isPhone = /^\+?[\d\s\-\(\)]+$/.test(login_id);
+    const loginType = isEmail ? 'email' : (isPhone ? 'phone' : 'email');
+    
+    console.log(`🔐 [CREDENTIALS] Saving ${retailer} credentials (${loginType}: ${login_id})`);
+    
+    // Test login credentials first
+    const loginTest = await authService.testRetailerLogin(retailer, login_id, password);
+    
+    if (!loginTest.success) {
+      await whatsappService.sendMessage(
+        from,
+        `❌ Login failed for ${retailerConfig.displayName}:\n${loginTest.message}\n\n` +
+        "Please check your credentials and try again."
+      );
+      return;
+    }
+    
+    // Save credentials
+    await authService.saveRetailerCredentials(user.id, retailer, login_id, password, loginType);
+    
+    await whatsappService.sendMessage(
+      from,
+      `✅ Successfully connected to ${retailerConfig.displayName}!\n\n` +
+      `Login ID: ${login_id}\n` +
+      `Type: ${loginType}\n\n` +
+      "You can now order items and I'll use your authenticated account for better prices and availability."
+    );
+    
+  } catch (error) {
+    console.error('❌ [CREDENTIALS] Error handling credential input:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error saving your credentials. Please try again.");
   }
 }
 
@@ -603,6 +707,55 @@ async function handleShowPricesIntent(from, user) {
       from,
       "😔 Sorry, I encountered an error showing prices. Please try again."
     );
+  }
+}
+
+// Handle show connected retailers
+async function handleShowConnectedRetailers(from, user) {
+  try {
+    console.log(`🔐 [RETAILERS] Showing connected retailers for user ${user.id}`);
+    
+    const authService = require('../services/authService');
+    const { getRetailerByName } = require('../config/retailers');
+    
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    
+    if (userCredentials.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🔐 *Connected Retailers:*\n\n" +
+        "You haven't connected any retailer accounts yet.\n\n" +
+        "To connect accounts, say:\n" +
+        "• 'Login Zepto'\n" +
+        "• 'Login Blinkit'\n" +
+        "• 'Login Instamart'\n\n" +
+        "This will help me get better prices and availability for you!"
+      );
+      return;
+    }
+    
+    let message = "🔐 *Your Connected Retailers:*\n\n";
+    
+    for (const credential of userCredentials) {
+      const retailerConfig = getRetailerByName(credential.retailer);
+      const displayName = retailerConfig ? retailerConfig.displayName : credential.retailer;
+      const loginId = credential.login_id;
+      const loginType = credential.login_type;
+      const connectedDate = new Date(credential.created_at).toLocaleDateString();
+      
+      message += `✅ *${displayName}*\n`;
+      message += `   ${loginType}: ${loginId}\n`;
+      message += `   Connected: ${connectedDate}\n\n`;
+    }
+    
+    message += "To disconnect a retailer, say:\n";
+    message += "'Disconnect [retailer name]'";
+    
+    await whatsappService.sendMessage(from, message);
+    
+  } catch (error) {
+    console.error('❌ [RETAILERS] Error showing connected retailers:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
   }
 }
 
