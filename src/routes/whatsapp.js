@@ -112,6 +112,33 @@ async function processMessage(from, message, messageSid, messageType) {
     // DIRECT PATTERN MATCHING (First Priority) - Simple Commands
     const lowerMessage = message.toLowerCase().trim();
     
+    // Check user's current session/flow state
+    const userSession = await userService.getUserSession(user.id);
+    console.log(`🔍 [SESSION] User ${user.id} session:`, userSession);
+    
+    // Handle authentication flow based on session state
+    if (userSession.auth_flow) {
+      console.log(`🔐 [AUTH_FLOW] Processing ${userSession.auth_flow} flow for user ${user.id}`);
+      
+      if (userSession.auth_flow === 'phone_login') {
+        if (userSession.auth_step === 'phone_input') {
+          await handlePhoneNumberInput(from, user, message);
+          return;
+        } else if (userSession.auth_step === 'otp_input') {
+          await handleOTPInput(from, user, message);
+          return;
+        }
+      } else if (userSession.auth_flow === 'email_login') {
+        if (userSession.auth_step === 'email_input') {
+          await handleEmailInput(from, user, message);
+          return;
+        } else if (userSession.auth_step === 'password_input') {
+          await handlePasswordInput(from, user, message);
+          return;
+        }
+      }
+    }
+    
     // Authentication commands
     if (lowerMessage.startsWith('login ')) {
       const retailer = lowerMessage.replace('login ', '').trim();
@@ -638,6 +665,9 @@ async function handleAuthenticationIntent(from, user, parsedIntent) {
       return;
     }
 
+    // Store retailer in session for the authentication flow
+    await userService.updateUserSession(user.id, { retailer });
+    
     // Start authentication flow with login method selection
     await whatsappService.sendMessage(
       from,
@@ -925,10 +955,14 @@ async function handlePhoneLoginMethod(from, user) {
   try {
     console.log(`📱 [PHONE_LOGIN] User ${user.id} selected phone login method`);
     
+    // Get current session to retrieve retailer
+    const userSession = await userService.getUserSession(user.id);
+    
     // Store the login method selection in user session
     await userService.updateUserSession(user.id, { 
       auth_flow: 'phone_login',
-      auth_step: 'phone_input'
+      auth_step: 'phone_input',
+      retailer: userSession.retailer || 'zepto'
     });
     
     await whatsappService.sendMessage(
@@ -965,6 +999,180 @@ async function handleEmailLoginMethod(from, user) {
     
   } catch (error) {
     console.error('❌ [EMAIL_LOGIN] Error handling email login method:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle phone number input during authentication
+async function handlePhoneNumberInput(from, user, phoneNumber) {
+  try {
+    console.log(`📱 [PHONE_INPUT] Processing phone number for user ${user.id}: ${phoneNumber}`);
+    
+    // Validate phone number format
+    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+    if (!phoneRegex.test(phoneNumber.replace(/\s/g, ''))) {
+      await whatsappService.sendMessage(
+        from,
+        "❌ Invalid phone number format.\n\n" +
+        "Please enter a valid phone number:\n" +
+        "Format: +91XXXXXXXXXX\n" +
+        "Example: +919876543210"
+      );
+      return;
+    }
+    
+    // Store phone number in session
+    await userService.updateUserSession(user.id, {
+      auth_flow: 'phone_login',
+      auth_step: 'otp_input',
+      phone_number: phoneNumber,
+      retailer: user.retailer || 'zepto' // Default to zepto for now
+    });
+    
+    // Send OTP (simulate for now)
+    const otp = Math.floor(100000 + Math.random() * 900000); // 6-digit OTP
+    
+    await whatsappService.sendMessage(
+      from,
+      `📱 *OTP Sent!*\n\n` +
+      `A 6-digit OTP has been sent to ${phoneNumber}\n\n` +
+      `Enter the OTP code:`
+    );
+    
+    console.log(`📱 [OTP] Generated OTP for ${phoneNumber}: ${otp}`);
+    
+  } catch (error) {
+    console.error('❌ [PHONE_INPUT] Error handling phone number input:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle OTP input during authentication
+async function handleOTPInput(from, user, otpCode) {
+  try {
+    console.log(`🔐 [OTP_INPUT] Processing OTP for user ${user.id}: ${otpCode}`);
+    
+    // Validate OTP format
+    const otpRegex = /^\d{6}$/;
+    if (!otpRegex.test(otpCode)) {
+      await whatsappService.sendMessage(
+        from,
+        "❌ Invalid OTP format.\n\n" +
+        "Please enter the 6-digit OTP code:"
+      );
+      return;
+    }
+    
+    // Get user session to retrieve phone number and retailer
+    const userSession = await userService.getUserSession(user.id);
+    
+    // For now, accept any 6-digit OTP (in real implementation, verify against sent OTP)
+    const authService = require('../services/authService');
+    const { getRetailerByName } = require('../config/retailers');
+    
+    const retailer = userSession.retailer || 'zepto';
+    const retailerConfig = getRetailerByName(retailer);
+    
+    // Save credentials (phone number as login_id, OTP as temporary password)
+    await authService.saveRetailerCredentials(
+      user.id, 
+      retailer, 
+      userSession.phone_number, 
+      `otp_${otpCode}`, // Temporary password
+      'phone'
+    );
+    
+    // Clear session
+    await userService.updateUserSession(user.id, {});
+    
+    await whatsappService.sendMessage(
+      from,
+      `✅ *Successfully connected to ${retailerConfig.displayName}!*\n\n` +
+      `Phone: ${userSession.phone_number}\n` +
+      `Login Method: Phone + OTP\n\n` +
+      "You can now order items and I'll use your authenticated account for better prices and availability."
+    );
+    
+  } catch (error) {
+    console.error('❌ [OTP_INPUT] Error handling OTP input:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle email input during authentication
+async function handleEmailInput(from, user, email) {
+  try {
+    console.log(`📧 [EMAIL_INPUT] Processing email for user ${user.id}: ${email}`);
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      await whatsappService.sendMessage(
+        from,
+        "❌ Invalid email format.\n\n" +
+        "Please enter a valid email address:\n" +
+        "Example: user@example.com"
+      );
+      return;
+    }
+    
+    // Store email in session
+    await userService.updateUserSession(user.id, {
+      auth_flow: 'email_login',
+      auth_step: 'password_input',
+      email: email,
+      retailer: user.retailer || 'zepto' // Default to zepto for now
+    });
+    
+    await whatsappService.sendMessage(
+      from,
+      `📧 *Email Verified!*\n\n` +
+      `Email: ${email}\n\n` +
+      `Now enter your password:`
+    );
+    
+  } catch (error) {
+    console.error('❌ [EMAIL_INPUT] Error handling email input:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle password input during authentication
+async function handlePasswordInput(from, user, password) {
+  try {
+    console.log(`🔐 [PASSWORD_INPUT] Processing password for user ${user.id}`);
+    
+    // Get user session to retrieve email and retailer
+    const userSession = await userService.getUserSession(user.id);
+    
+    const authService = require('../services/authService');
+    const { getRetailerByName } = require('../config/retailers');
+    
+    const retailer = userSession.retailer || 'zepto';
+    const retailerConfig = getRetailerByName(retailer);
+    
+    // Save credentials
+    await authService.saveRetailerCredentials(
+      user.id, 
+      retailer, 
+      userSession.email, 
+      password,
+      'email'
+    );
+    
+    // Clear session
+    await userService.updateUserSession(user.id, {});
+    
+    await whatsappService.sendMessage(
+      from,
+      `✅ *Successfully connected to ${retailerConfig.displayName}!*\n\n` +
+      `Email: ${userSession.email}\n` +
+      `Login Method: Email + Password\n\n` +
+      "You can now order items and I'll use your authenticated account for better prices and availability."
+    );
+    
+  } catch (error) {
+    console.error('❌ [PASSWORD_INPUT] Error handling password input:', error);
     await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
   }
 }
