@@ -42,6 +42,52 @@ class UserService {
   }
 
   /**
+   * Update user's session data
+   * @param {number} userId - User ID
+   * @param {Object} sessionData - Session data to update
+   * @returns {Promise<Object>} - Updated user object
+   */
+  async updateUserSession(userId, sessionData) {
+    try {
+      const result = await query(
+        'UPDATE users SET session_data = COALESCE(session_data, \'{}\') || $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+        [JSON.stringify(sessionData), userId]
+      );
+      
+      if (result.rows.length > 0) {
+        console.log(`✅ [USER] Updated session data for user ${userId}`);
+        return result.rows[0];
+      }
+      return null;
+    } catch (error) {
+      console.error('❌ [USER] Error updating user session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's session data
+   * @param {number} userId - User ID
+   * @returns {Promise<Object>} - Session data object
+   */
+  async getUserSession(userId) {
+    try {
+      const result = await query(
+        'SELECT session_data FROM users WHERE id = $1',
+        [userId]
+      );
+      
+      if (result.rows.length > 0 && result.rows[0].session_data) {
+        return result.rows[0].session_data;
+      }
+      return {};
+    } catch (error) {
+      console.error('❌ [USER] Error getting user session:', error);
+      return {};
+    }
+  }
+
+  /**
    * Update user's allowed status
    * @param {number} userId - User ID
    * @param {boolean} allowed - Whether user is allowed to use the service

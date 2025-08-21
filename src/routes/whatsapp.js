@@ -109,9 +109,46 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
 
-    // Check for connected retailers command
-    if (message.toLowerCase().includes('connected retailers') || message.toLowerCase().includes('show connected') || message.toLowerCase().includes('my retailers')) {
+    // DIRECT PATTERN MATCHING (First Priority) - Simple Commands
+    const lowerMessage = message.toLowerCase().trim();
+    
+    // Authentication commands
+    if (lowerMessage.startsWith('login ')) {
+      const retailer = lowerMessage.replace('login ', '').trim();
+      await handleAuthenticationIntent(from, user, { intent: 'authentication', retailer });
+      return;
+    }
+    
+    // Simple commands
+    if (lowerMessage === 'show cart' || lowerMessage === 'view cart') {
+      await handleShowCartIntent(from, user);
+      return;
+    }
+    
+    // Login method selection
+    if (lowerMessage === 'phone' || lowerMessage === '1') {
+      await handlePhoneLoginMethod(from, user);
+      return;
+    }
+    
+    if (lowerMessage === 'email' || lowerMessage === '2') {
+      await handleEmailLoginMethod(from, user);
+      return;
+    }
+    
+    if (lowerMessage === 'connected retailers' || lowerMessage === 'show connected' || lowerMessage === 'my retailers') {
       await handleShowConnectedRetailers(from, user);
+      return;
+    }
+    
+    if (lowerMessage === 'help' || lowerMessage === 'start') {
+      await sendHelpMessage(from);
+      return;
+    }
+    
+    if (lowerMessage === 'stop' || lowerMessage === 'unsubscribe') {
+      await userService.updateUserAllowed(user.id, false);
+      await whatsappService.sendMessage(from, "👋 You've been unsubscribed from ShopGenie AI. Send 'start' to re-enable.");
       return;
     }
 
@@ -121,7 +158,8 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
 
-    // Use AI to parse the message
+    // AI PARSING (Second Priority) - Complex Commands
+    console.log(`🤖 [AI] Using AI parsing for complex command: "${message}"`);
     const parsedIntent = await aiService.parseMessage(message);
     
     if (parsedIntent.intent === 'order') {
@@ -600,17 +638,16 @@ async function handleAuthenticationIntent(from, user, parsedIntent) {
       return;
     }
 
-    // Start authentication flow
-    const loginMethods = retailerConfig.loginMethods.join(' or ');
+    // Start authentication flow with login method selection
     await whatsappService.sendMessage(
       from,
-      `🔐 Let's connect your ${retailerConfig.displayName} account!\n\n` +
-      `Send your ${retailerConfig.displayName} login details in this format:\n` +
-      `'${retailer} ${loginMethods} password'\n\n` +
-      "Examples:\n" +
-      `• '${retailer} user@example.com password123'\n` +
-      `• '${retailer} +919876543210 password123'\n\n` +
-      "Your password will be encrypted and stored securely."
+      `🔐 *Connect to ${retailerConfig.displayName}*\n\n` +
+      "Choose your login method:\n\n" +
+      "1️⃣ *Phone + OTP*\n" +
+      "   Send: 'phone'\n\n" +
+      "2️⃣ *Email + Password*\n" +
+      "   Send: 'email'\n\n" +
+      "Which method would you prefer?"
     );
 
   } catch (error) {
@@ -880,6 +917,55 @@ async function handleShowPricesIntent(from, user) {
   } catch (error) {
     console.error('❌ [SHOW_PRICES] Error handling show prices intent:', error);
     throw error;
+  }
+}
+
+// Handle phone login method selection
+async function handlePhoneLoginMethod(from, user) {
+  try {
+    console.log(`📱 [PHONE_LOGIN] User ${user.id} selected phone login method`);
+    
+    // Store the login method selection in user session
+    await userService.updateUserSession(user.id, { 
+      auth_flow: 'phone_login',
+      auth_step: 'phone_input'
+    });
+    
+    await whatsappService.sendMessage(
+      from,
+      "📱 *Phone + OTP Login*\n\n" +
+      "Enter your phone number:\n" +
+      "Format: +91XXXXXXXXXX\n\n" +
+      "Example: +919876543210"
+    );
+    
+  } catch (error) {
+    console.error('❌ [PHONE_LOGIN] Error handling phone login method:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle email login method selection
+async function handleEmailLoginMethod(from, user) {
+  try {
+    console.log(`📧 [EMAIL_LOGIN] User ${user.id} selected email login method`);
+    
+    // Store the login method selection in user session
+    await userService.updateUserSession(user.id, { 
+      auth_flow: 'email_login',
+      auth_step: 'email_input'
+    });
+    
+    await whatsappService.sendMessage(
+      from,
+      "📧 *Email + Password Login*\n\n" +
+      "Enter your email address:\n" +
+      "Example: user@example.com"
+    );
+    
+  } catch (error) {
+    console.error('❌ [EMAIL_LOGIN] Error handling email login method:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
   }
 }
 

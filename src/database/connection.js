@@ -114,6 +114,11 @@ async function initializeTables() {
       await client.query('ALTER TABLE users ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()');
       console.log('✅ Added updated_at column to users table');
     }
+    
+    if (!userColumnNames.includes('session_data')) {
+      await client.query('ALTER TABLE users ADD COLUMN session_data JSONB DEFAULT \'{}\'');
+      console.log('✅ Added session_data column to users table');
+    }
 
     // Check cart_items table structure
     const cartItemsColumns = await client.query(`
