@@ -1,5 +1,7 @@
 # ShopGenie AI - WhatsApp Shopping Assistant
 
+> **Last Updated**: 2025-08-22 06:42 UTC
+
 A WhatsApp-based AI shopping assistant that helps users compare prices across multiple grocery delivery platforms and create optimized carts.
 
 ## 🚀 Features
