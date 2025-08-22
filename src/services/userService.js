@@ -50,12 +50,12 @@ class UserService {
   async updateUserSession(userId, sessionData) {
     try {
       const result = await query(
-        'UPDATE users SET session_data = COALESCE(session_data, \'{}\') || $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+        'UPDATE users SET session_data = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
         [JSON.stringify(sessionData), userId]
       );
       
       if (result.rows.length > 0) {
-        console.log(`✅ [USER] Updated session data for user ${userId}`);
+        console.log(`✅ [USER] Updated session data for user ${userId}:`, sessionData);
         return result.rows[0];
       }
       return null;
