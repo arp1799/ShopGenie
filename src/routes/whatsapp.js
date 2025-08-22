@@ -116,6 +116,14 @@ async function processMessage(from, message, messageSid, messageType) {
     const userSession = await userService.getUserSession(user.id);
     console.log(`🔍 [SESSION] User ${user.id} session:`, userSession);
     
+    // Clear session command (highest priority - bypasses auth flow)
+    if (lowerMessage === 'clear session' || lowerMessage === 'reset') {
+      console.log('🧹 [SESSION] Direct pattern match: clear session command');
+      await userService.updateUserSession(user.id, {});
+      await whatsappService.sendMessage(from, "🔄 Session cleared! You can start fresh now.");
+      return;
+    }
+    
     // Handle authentication flow based on session state
     if (userSession.auth_flow) {
       console.log(`🔐 [AUTH_FLOW] Processing ${userSession.auth_flow} flow for user ${user.id}`);
@@ -175,12 +183,7 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
     
-    // Clear session command
-    if (lowerMessage === 'clear session' || lowerMessage === 'reset') {
-      await userService.updateUserSession(user.id, {});
-      await whatsappService.sendMessage(from, "🔄 Session cleared! You can start fresh now.");
-      return;
-    }
+
     
     if (lowerMessage === 'connected retailers' || lowerMessage === 'show connected' || lowerMessage === 'my retailers') {
       await handleShowConnectedRetailers(from, user);
@@ -382,7 +385,7 @@ async function handleAddItemIntent(from, user, parsedIntent) {
 
     // Show product suggestions for the newly added items
     const productSuggestions = await cartService.getProductSuggestions(cart.id, user.id);
-    await sendProductSuggestions(from, productSuggestions);
+    await sendProductSuggestions(from, productSuggestions, user);
 
   } catch (error) {
     console.error('❌ [ADD_ITEM] Error handling add item intent:', error);
@@ -529,7 +532,7 @@ Reply with:
 }
 
 // Send product suggestions
-async function sendProductSuggestions(from, suggestions) {
+async function sendProductSuggestions(from, suggestions, user) {
   let message = "🛒 *Product Suggestions:*\n\n";
   
   for (const [itemName, retailers] of Object.entries(suggestions)) {
