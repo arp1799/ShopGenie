@@ -88,43 +88,79 @@ async function processMessage(from, message, messageSid, messageType) {
     // Log the message
     await userService.logMessage(user.id, 'inbound', message, { messageSid });
 
-    // Check for special commands
-    if (message.toLowerCase().includes('help') || message.toLowerCase().includes('start')) {
-      await sendHelpMessage(from);
+    // STEP 1: Handle location messages (highest priority)
+    if (messageType === 'application/vnd.geo+json' || messageType === 'location') {
+      await handleLocationMessage(from, user, message, messageSid);
       return;
     }
 
-    if (message.toLowerCase().includes('stop') || message.toLowerCase().includes('unsubscribe')) {
-      await userService.updateUserAllowed(user.id, false);
-      await whatsappService.sendMessage(
-        from,
-        "👋 You've been unsubscribed from ShopGenie AI. Send 'start' to re-enable."
-      );
-      return;
-    }
-
-    // Check for show cart command (direct check)
-    if (message.toLowerCase().includes('show cart') || message.toLowerCase().includes('view cart')) {
-      await handleShowCartIntent(from, user);
-      return;
-    }
-
-    // DIRECT PATTERN MATCHING (First Priority) - Simple Commands
-    const lowerMessage = message.toLowerCase().trim();
-    
-    // Check user's current session/flow state
+    // STEP 2: Get user session for flow management
     const userSession = await userService.getUserSession(user.id);
     console.log(`🔍 [SESSION] User ${user.id} session:`, userSession);
+
+    // STEP 3: Handle direct pattern matches (bypasses everything else)
+    const lowerMessage = message.toLowerCase().trim();
     
-    // Clear session command (highest priority - bypasses auth flow)
+    // Emergency commands (always work)
     if (lowerMessage === 'clear session' || lowerMessage === 'reset') {
       console.log('🧹 [SESSION] Direct pattern match: clear session command');
       await userService.updateUserSession(user.id, {});
       await whatsappService.sendMessage(from, "🔄 Session cleared! You can start fresh now.");
       return;
     }
-    
-    // Handle authentication flow based on session state
+
+    // Simple commands (no AI needed)
+    if (lowerMessage === 'help' || lowerMessage === 'start') {
+      await sendHelpMessage(from);
+      return;
+    }
+
+    if (lowerMessage === 'stop' || lowerMessage === 'unsubscribe') {
+      await userService.updateUserAllowed(user.id, false);
+      await whatsappService.sendMessage(from, "👋 You've been unsubscribed from ShopGenie AI. Send 'start' to re-enable.");
+      return;
+    }
+
+    if (lowerMessage === 'show cart' || lowerMessage === 'view cart') {
+      await handleShowCartIntent(from, user);
+      return;
+    }
+
+    if (lowerMessage === 'show prices' || lowerMessage === 'prices') {
+      await handleShowPricesIntent(from, user);
+      return;
+    }
+
+    if (lowerMessage === 'connected retailers' || lowerMessage === 'show connected' || lowerMessage === 'my retailers') {
+      await handleShowConnectedRetailers(from, user);
+      return;
+    }
+
+    // Authentication commands
+    if (lowerMessage.startsWith('login ')) {
+      const retailer = lowerMessage.replace('login ', '').trim();
+      await handleAuthenticationIntent(from, user, { intent: 'authentication', retailer });
+      return;
+    }
+
+    // Login method selection
+    if (lowerMessage === 'phone' || lowerMessage === '1') {
+      await handlePhoneLoginMethod(from, user);
+      return;
+    }
+
+    if (lowerMessage === 'email' || lowerMessage === '2') {
+      await handleEmailLoginMethod(from, user);
+      return;
+    }
+
+    // Resend OTP command
+    if (lowerMessage === 'resend otp' || lowerMessage === 'resend') {
+      await handleResendOTP(from, user);
+      return;
+    }
+
+    // STEP 4: Handle authentication flow (if active)
     if (userSession.auth_flow) {
       console.log(`🔐 [AUTH_FLOW] Processing ${userSession.auth_flow} flow for user ${user.id}`);
       
@@ -146,101 +182,54 @@ async function processMessage(from, message, messageSid, messageType) {
         }
       }
     }
-    
-    // Clear any stale session data if no active auth flow
+
+    // STEP 5: Clear stale session data
     if (userSession.auth_flow && !userSession.auth_step) {
       console.log(`🧹 [SESSION] Clearing stale session data for user ${user.id}`);
       await userService.updateUserSession(user.id, {});
     }
-    
-    // Authentication commands
-    if (lowerMessage.startsWith('login ')) {
-      const retailer = lowerMessage.replace('login ', '').trim();
-      await handleAuthenticationIntent(from, user, { intent: 'authentication', retailer });
-      return;
-    }
-    
-    // Simple commands
-    if (lowerMessage === 'show cart' || lowerMessage === 'view cart') {
-      await handleShowCartIntent(from, user);
-      return;
-    }
-    
-    if (lowerMessage === 'show prices' || lowerMessage === 'prices') {
-      await handleShowPricesIntent(from, user);
-      return;
-    }
-    
-    // Login method selection
-    if (lowerMessage === 'phone' || lowerMessage === '1') {
-      await handlePhoneLoginMethod(from, user);
-      return;
-    }
-    
-    if (lowerMessage === 'email' || lowerMessage === '2') {
-      await handleEmailLoginMethod(from, user);
-      return;
-    }
-    
-    // Resend OTP command
-    if (lowerMessage === 'resend otp' || lowerMessage === 'resend') {
-      await handleResendOTP(from, user);
-      return;
-    }
-    
 
-    
-    if (lowerMessage === 'connected retailers' || lowerMessage === 'show connected' || lowerMessage === 'my retailers') {
-      await handleShowConnectedRetailers(from, user);
-      return;
-    }
-    
-    if (lowerMessage === 'help' || lowerMessage === 'start') {
-      await sendHelpMessage(from);
-      return;
-    }
-    
-    if (lowerMessage === 'stop' || lowerMessage === 'unsubscribe') {
-      await userService.updateUserAllowed(user.id, false);
-      await whatsappService.sendMessage(from, "👋 You've been unsubscribed from ShopGenie AI. Send 'start' to re-enable.");
-      return;
-    }
-
-    // Handle location messages
-    if (messageType === 'application/vnd.geo+json' || messageType === 'location') {
-      await handleLocationMessage(from, user, message, messageSid);
-      return;
-    }
-
-    // AI PARSING (Second Priority) - Complex Commands
+    // STEP 6: AI PARSING (only for complex commands)
     console.log(`🤖 [AI] Using AI parsing for complex command: "${message}"`);
     const parsedIntent = await aiService.parseMessage(message);
     
-    if (parsedIntent.intent === 'order') {
-      await handleOrderIntent(from, user, parsedIntent);
-    } else if (parsedIntent.intent === 'add_item') {
-      await handleAddItemIntent(from, user, parsedIntent);
-    } else if (parsedIntent.intent === 'remove_item') {
-      await handleRemoveItemIntent(from, user, parsedIntent);
-    } else if (parsedIntent.intent === 'show_prices') {
-      await handleShowPricesIntent(from, user);
-    } else if (parsedIntent.intent === 'show_cart') {
-      await handleShowCartIntent(from, user);
-    } else if (parsedIntent.intent === 'address_confirmation') {
-      await handleAddressConfirmation(from, user, parsedIntent);
-    } else if (parsedIntent.intent === 'authentication') {
-      await handleAuthenticationIntent(from, user, parsedIntent);
-    } else if (parsedIntent.intent === 'credential_input') {
-      await handleCredentialInput(from, user, parsedIntent);
-    } else if (parsedIntent.intent === 'product_selection') {
-      await handleProductSelection(from, user, parsedIntent);
-    } else if (parsedIntent.intent === 'retailer_selection') {
-      await handleRetailerSelection(from, user, parsedIntent);
-    } else {
-      await whatsappService.sendMessage(
-        from,
-        "🤔 I didn't understand that. Try saying:\n\n'Order milk and bread to 123 Main St, Bangalore'\n\nOr type 'help' for more options."
-      );
+    // Handle AI parsed intents
+    switch (parsedIntent.intent) {
+      case 'order':
+        await handleOrderIntent(from, user, parsedIntent);
+        break;
+      case 'add_item':
+        await handleAddItemIntent(from, user, parsedIntent);
+        break;
+      case 'remove_item':
+        await handleRemoveItemIntent(from, user, parsedIntent);
+        break;
+      case 'show_prices':
+        await handleShowPricesIntent(from, user);
+        break;
+      case 'show_cart':
+        await handleShowCartIntent(from, user);
+        break;
+      case 'address_confirmation':
+        await handleAddressConfirmation(from, user, parsedIntent);
+        break;
+      case 'authentication':
+        await handleAuthenticationIntent(from, user, parsedIntent);
+        break;
+      case 'credential_input':
+        await handleCredentialInput(from, user, parsedIntent);
+        break;
+      case 'product_selection':
+        await handleProductSelection(from, user, parsedIntent);
+        break;
+      case 'retailer_selection':
+        await handleRetailerSelection(from, user, parsedIntent);
+        break;
+      default:
+        await whatsappService.sendMessage(
+          from,
+          "🤔 I didn't understand that. Try saying:\n\n'Order milk and bread to 123 Main St, Bangalore'\n\nOr type 'help' for more options."
+        );
     }
 
   } catch (error) {
