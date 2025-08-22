@@ -1101,8 +1101,13 @@ async function handleOTPInput(from, user, otpCode) {
       'phone'
     );
     
-    // Clear session
+    // Clear session completely
     await userService.updateUserSession(user.id, {});
+    console.log(`🧹 [SESSION] Cleared session for user ${user.id} after successful authentication`);
+    
+    // Verify session is cleared
+    const clearedSession = await userService.getUserSession(user.id);
+    console.log(`🔍 [SESSION] Verified cleared session:`, clearedSession);
     
     await whatsappService.sendMessage(
       from,
@@ -1179,8 +1184,13 @@ async function handlePasswordInput(from, user, password) {
       'email'
     );
     
-    // Clear session
+    // Clear session completely
     await userService.updateUserSession(user.id, {});
+    console.log(`🧹 [SESSION] Cleared session for user ${user.id} after successful authentication`);
+    
+    // Verify session is cleared
+    const clearedSession = await userService.getUserSession(user.id);
+    console.log(`🔍 [SESSION] Verified cleared session:`, clearedSession);
     
     await whatsappService.sendMessage(
       from,
