@@ -166,6 +166,11 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
     
+    if (lowerMessage === 'show prices' || lowerMessage === 'prices') {
+      await handleShowPricesIntent(from, user);
+      return;
+    }
+    
     // Login method selection
     if (lowerMessage === 'phone' || lowerMessage === '1') {
       await handlePhoneLoginMethod(from, user);
@@ -331,7 +336,7 @@ async function handleOrderIntent(from, user, parsedIntent) {
     const productSuggestions = await cartService.getProductSuggestions(cart.id, user.id);
     
     // Send product suggestions message
-    await sendProductSuggestions(from, productSuggestions);
+    await sendProductSuggestions(from, productSuggestions, user);
 
   } catch (error) {
     console.error('❌ Error handling order intent:', error);
