@@ -211,6 +211,25 @@ class AuthService {
   }
 
   /**
+   * Delete all retailer credentials for a user
+   * @param {number} userId - User ID
+   * @returns {Promise<boolean>} - Success status
+   */
+  async deleteAllRetailerCredentials(userId) {
+    try {
+      await query(
+        'DELETE FROM retailer_credentials WHERE user_id = $1',
+        [userId]
+      );
+      console.log(`✅ Deleted all retailer credentials for user ${userId}`);
+      return true;
+    } catch (error) {
+      console.error(`❌ Error deleting all retailer credentials:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Test retailer login credentials
    * @param {string} retailer - Retailer name
    * @param {string} email - User email

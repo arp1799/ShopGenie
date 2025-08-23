@@ -104,8 +104,36 @@ async function processMessage(from, message, messageSid, messageType) {
     // Emergency commands (always work)
     if (lowerMessage === 'clear session' || lowerMessage === 'reset') {
       console.log('🧹 [SESSION] Direct pattern match: clear session command');
+      
+      // Clear session data
       await userService.updateUserSession(user.id, {});
+      
+      // Clear retailer credentials (optional - uncomment if you want to clear auth too)
+      // const authService = require('../services/authService');
+      // await authService.deleteAllRetailerCredentials(user.id);
+      
       await whatsappService.sendMessage(from, "🔄 Session cleared! You can start fresh now.");
+      return;
+    }
+    
+    // Clear all data (session + auth + cart)
+    if (lowerMessage === 'clear all' || lowerMessage === 'reset all') {
+      console.log('🧹 [SESSION] Direct pattern match: clear all command');
+      
+      // Clear session data
+      await userService.updateUserSession(user.id, {});
+      
+      // Clear retailer credentials
+      const authService = require('../services/authService');
+      await authService.deleteAllRetailerCredentials(user.id);
+      
+      // Clear cart
+      const cart = await cartService.getActiveCart(user.id);
+      if (cart) {
+        await cartService.clearCart(cart.id);
+      }
+      
+      await whatsappService.sendMessage(from, "🔄 All data cleared! Session, authentication, and cart reset.");
       return;
     }
 

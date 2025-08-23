@@ -589,6 +589,25 @@ class CartService {
   }
 
   /**
+   * Clear all items from a cart
+   * @param {number} cartId - Cart ID
+   * @returns {Promise<boolean>} - Success status
+   */
+  async clearCart(cartId) {
+    try {
+      await query(
+        'DELETE FROM cart_items WHERE cart_id = $1',
+        [cartId]
+      );
+      console.log(`✅ Cleared all items from cart ${cartId}`);
+      return true;
+    } catch (error) {
+      console.error('❌ Error clearing cart:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get mixed product suggestions from all retailers for a specific item
    * @param {string} itemName - Item name
    * @param {number} userId - User ID for authentication
