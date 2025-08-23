@@ -159,6 +159,11 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
 
+    if (lowerMessage === 'checkout') {
+      await handleCheckoutIntent(from, user);
+      return;
+    }
+
     if (lowerMessage === 'connected retailers' || lowerMessage === 'show connected' || lowerMessage === 'my retailers' || 
         lowerMessage === 'my loginned apps' || lowerMessage === 'my logged in apps' || lowerMessage === 'logged in apps') {
       await handleShowConnectedRetailers(from, user);
@@ -214,6 +219,42 @@ async function processMessage(from, message, messageSid, messageType) {
         itemName: 'all',
         selectAll: true
       });
+      return;
+    }
+
+    // Checkout flow commands
+    if (lowerMessage === 'cancel checkout' || lowerMessage === 'cancel order') {
+      await userService.updateUserSession(user.id, {});
+      await whatsappService.sendMessage(from, "❌ Checkout cancelled. You can start over anytime.");
+      return;
+    }
+
+    if (lowerMessage === 'confirm order') {
+      await handleConfirmOrder(from, user);
+      return;
+    }
+
+    if (lowerMessage === 'edit cart') {
+      await handleEditCart(from, user);
+      return;
+    }
+
+    // Retailer selection for checkout (e.g., "zepto for milk", "blinkit for bread")
+    const retailerSelectionPattern = /^(\w+)\s+for\s+(.+)$/i;
+    const retailerSelectionMatch = lowerMessage.match(retailerSelectionPattern);
+    if (retailerSelectionMatch) {
+      const retailer = retailerSelectionMatch[1].toLowerCase();
+      const itemName = retailerSelectionMatch[2].trim();
+      await handleRetailerSelectionForCheckout(from, user, retailer, itemName);
+      return;
+    }
+
+    // Skip item command (e.g., "skip milk", "skip bread")
+    const skipPattern = /^skip\s+(.+)$/i;
+    const skipMatch = lowerMessage.match(skipPattern);
+    if (skipMatch) {
+      const itemName = skipMatch[1].trim();
+      await handleSkipItem(from, user, itemName);
       return;
     }
 
@@ -1023,6 +1064,158 @@ async function handleShowPricesIntent(from, user) {
   }
 }
 
+// Handle checkout intent
+async function handleCheckoutIntent(from, user) {
+  try {
+    console.log(`🛒 [CHECKOUT] Processing checkout intent for user ${user.id}`);
+    
+    // Check if user has authenticated retailers
+    const authService = require('../services/authService');
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    
+    if (userCredentials.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🔐 *Please connect your retailer accounts first!*\n\n" +
+        "To get the best prices and availability, connect your accounts:\n\n" +
+        "• 'Login Zepto' - Connect Zepto account\n" +
+        "• 'Login Blinkit' - Connect Blinkit account\n" +
+        "• 'Login Instamart' - Connect Swiggy Instamart account\n\n" +
+        "This will help me access your personalized pricing and delivery options."
+      );
+      return;
+    }
+    
+    const cart = await cartService.getActiveCart(user.id);
+    if (!cart) {
+      await whatsappService.sendMessage(
+        from,
+        "🛒 Your cart is empty.\n\nStart by saying 'Order [items]'"
+      );
+      return;
+    }
+
+    const cartItems = await cartService.getCartItemsCombined(cart.id);
+    if (cartItems.length === 0) {
+      await whatsappService.sendMessage(
+        from,
+        "🛒 Your cart is empty.\n\nStart by saying 'Order [items]'"
+      );
+      return;
+    }
+
+    // Set checkout mode in session
+    await userService.updateUserSession(user.id, {
+      checkout_mode: true,
+      checkout_step: 'item_selection',
+      checkout_items: cartItems.map(item => item.product_name),
+      checkout_current_item: 0
+    });
+
+    // Show first item for selection
+    await showNextCheckoutItem(from, user, cartItems, 0);
+
+  } catch (error) {
+    console.error('❌ [CHECKOUT] Error handling checkout intent:', error);
+    await whatsappService.sendMessage(
+      from,
+      "😔 Sorry, I encountered an error. Please try again."
+    );
+  }
+}
+
+// Show next item in checkout process
+async function showNextCheckoutItem(from, user, cartItems, currentIndex) {
+  try {
+    if (currentIndex >= cartItems.length) {
+      // All items processed, show final cart
+      await showFinalCheckoutCart(from, user);
+      return;
+    }
+
+    const currentItem = cartItems[currentIndex];
+    const itemName = currentItem.product_name;
+    
+    // Get price comparison for this item
+    const priceComparison = await aiService.scrapePriceComparison(itemName, user.id);
+    
+    let message = `🛒 *Checkout - Item ${currentIndex + 1}/${cartItems.length}*\n\n`;
+    message += `*${itemName}* (${currentItem.total_quantity} ${currentItem.unit})\n\n`;
+    
+    // Show available retailers and prices
+    const authService = require('../services/authService');
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    const authenticatedRetailers = userCredentials.map(cred => cred.retailer);
+    
+    let hasValidPrices = false;
+    for (const retailer of authenticatedRetailers) {
+      const retailerPrice = priceComparison.find(p => p.retailer.toLowerCase() === retailer);
+      if (retailerPrice && retailerPrice.price !== 'N/A') {
+        message += `• ${retailer.charAt(0).toUpperCase() + retailer.slice(1)}: ₹${retailerPrice.price} (${retailerPrice.delivery_time})\n`;
+        hasValidPrices = true;
+      }
+    }
+    
+    if (!hasValidPrices) {
+      message += `• No prices available for authenticated retailers\n`;
+    }
+    
+    message += `\n*Select retailer for this item:*\n`;
+    for (let i = 0; i < authenticatedRetailers.length; i++) {
+      const retailer = authenticatedRetailers[i];
+      message += `• '${retailer} for ${itemName}' - Select ${retailer.charAt(0).toUpperCase() + retailer.slice(1)}\n`;
+    }
+    
+    message += `\n*Or:*\n`;
+    message += `• 'skip ${itemName}' - Skip this item\n`;
+    message += `• 'cancel checkout' - Cancel checkout process`;
+
+    await whatsappService.sendMessage(from, message);
+
+  } catch (error) {
+    console.error('❌ Error showing next checkout item:', error);
+    throw error;
+  }
+}
+
+// Show final checkout cart
+async function showFinalCheckoutCart(from, user) {
+  try {
+    const cart = await cartService.getActiveCart(user.id);
+    const cartItems = await cartService.getCartItemsCombined(cart.id);
+    
+    let message = `✅ *Final Checkout Cart*\n\n`;
+    let totalAmount = 0;
+    
+    for (const item of cartItems) {
+      if (item.selected_retailer) {
+        const itemTotal = item.selected_product_price * item.total_quantity;
+        totalAmount += itemTotal;
+        
+        message += `*${item.product_name}*\n`;
+        message += `• ${item.selected_product_name}\n`;
+        message += `• Retailer: ${item.selected_retailer}\n`;
+        message += `• Price: ₹${item.selected_product_price} × ${item.total_quantity} = ₹${itemTotal}\n`;
+        message += `• Delivery: ${item.selected_delivery_time}\n\n`;
+      } else {
+        message += `*${item.product_name}* - No retailer selected\n\n`;
+      }
+    }
+    
+    message += `*Total: ₹${totalAmount}*\n\n`;
+    message += `*Actions:*\n`;
+    message += `• 'confirm order' - Place your order\n`;
+    message += `• 'edit cart' - Go back to item selection\n`;
+    message += `• 'cancel order' - Cancel the order`;
+
+    await whatsappService.sendMessage(from, message);
+
+  } catch (error) {
+    console.error('❌ Error showing final checkout cart:', error);
+    throw error;
+  }
+}
+
 // Handle phone login method selection
 async function handlePhoneLoginMethod(from, user) {
   try {
@@ -1507,6 +1700,162 @@ async function handleAllProductSelection(from, user, cart, productSuggestions, s
   } catch (error) {
     console.error('❌ Error handling all product selection:', error);
     throw error;
+  }
+}
+
+// Handle retailer selection for checkout
+async function handleRetailerSelectionForCheckout(from, user, retailer, itemName) {
+  try {
+    console.log(`🛒 [CHECKOUT] User ${user.id} selected ${retailer} for ${itemName}`);
+    
+    const userSession = await userService.getUserSession(user.id);
+    if (!userSession.checkout_mode) {
+      await whatsappService.sendMessage(from, "❌ No active checkout session. Say 'checkout' to start.");
+      return;
+    }
+
+    // Get price comparison for this item
+    const priceComparison = await aiService.scrapePriceComparison(itemName, user.id);
+    const retailerPrice = priceComparison.find(p => p.retailer.toLowerCase() === retailer);
+    
+    if (!retailerPrice || retailerPrice.price === 'N/A') {
+      await whatsappService.sendMessage(
+        from,
+        `❌ No price available for ${retailer} for ${itemName}. Please select another retailer.`
+      );
+      return;
+    }
+
+    // Update cart item with selected retailer
+    const cart = await cartService.getActiveCart(user.id);
+    await cartService.updateCartItemWithRetailer(cart.id, itemName, retailer, retailerPrice);
+    
+    await whatsappService.sendMessage(
+      from,
+      `✅ Selected ${retailer.charAt(0).toUpperCase() + retailer.slice(1)} for ${itemName}\n` +
+      `Price: ₹${retailerPrice.price}\n` +
+      `Delivery: ${retailerPrice.delivery_time}`
+    );
+
+    // Move to next item
+    const cartItems = await cartService.getCartItemsCombined(cart.id);
+    const currentIndex = userSession.checkout_current_item || 0;
+    const nextIndex = currentIndex + 1;
+    
+    await userService.updateUserSession(user.id, {
+      ...userSession,
+      checkout_current_item: nextIndex
+    });
+
+    await showNextCheckoutItem(from, user, cartItems, nextIndex);
+
+  } catch (error) {
+    console.error('❌ Error handling retailer selection for checkout:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle skip item
+async function handleSkipItem(from, user, itemName) {
+  try {
+    console.log(`🛒 [CHECKOUT] User ${user.id} skipped ${itemName}`);
+    
+    const userSession = await userService.getUserSession(user.id);
+    if (!userSession.checkout_mode) {
+      await whatsappService.sendMessage(from, "❌ No active checkout session. Say 'checkout' to start.");
+      return;
+    }
+
+    await whatsappService.sendMessage(
+      from,
+      `⏭️ Skipped ${itemName}. Moving to next item...`
+    );
+
+    // Move to next item
+    const cart = await cartService.getActiveCart(user.id);
+    const cartItems = await cartService.getCartItemsCombined(cart.id);
+    const currentIndex = userSession.checkout_current_item || 0;
+    const nextIndex = currentIndex + 1;
+    
+    await userService.updateUserSession(user.id, {
+      ...userSession,
+      checkout_current_item: nextIndex
+    });
+
+    await showNextCheckoutItem(from, user, cartItems, nextIndex);
+
+  } catch (error) {
+    console.error('❌ Error handling skip item:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle confirm order
+async function handleConfirmOrder(from, user) {
+  try {
+    console.log(`🛒 [ORDER] User ${user.id} confirmed order`);
+    
+    const cart = await cartService.getActiveCart(user.id);
+    const cartItems = await cartService.getCartItemsCombined(cart.id);
+    
+    // Generate deep links for each retailer
+    const retailerCarts = {};
+    for (const item of cartItems) {
+      if (item.selected_retailer) {
+        if (!retailerCarts[item.selected_retailer]) {
+          retailerCarts[item.selected_retailer] = [];
+        }
+        retailerCarts[item.selected_retailer].push(item);
+      }
+    }
+    
+    let message = `🎉 *Order Confirmed!*\n\n`;
+    message += `Here are your checkout links:\n\n`;
+    
+    for (const [retailer, items] of Object.entries(retailerCarts)) {
+      const total = items.reduce((sum, item) => sum + (item.selected_product_price * item.total_quantity), 0);
+      message += `*${retailer.charAt(0).toUpperCase() + retailer.slice(1)} Cart:*\n`;
+      message += `Total: ₹${total}\n`;
+      message += `Items: ${items.length}\n`;
+      message += `🔗 [Checkout on ${retailer.charAt(0).toUpperCase() + retailer.slice(1)}](https://${retailer}.com/checkout)\n\n`;
+    }
+    
+    // Clear checkout session
+    await userService.updateUserSession(user.id, {});
+    
+    await whatsappService.sendMessage(from, message);
+
+  } catch (error) {
+    console.error('❌ Error handling confirm order:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle edit cart
+async function handleEditCart(from, user) {
+  try {
+    console.log(`🛒 [CHECKOUT] User ${user.id} wants to edit cart`);
+    
+    const userSession = await userService.getUserSession(user.id);
+    if (!userSession.checkout_mode) {
+      await whatsappService.sendMessage(from, "❌ No active checkout session. Say 'checkout' to start.");
+      return;
+    }
+
+    // Reset to first item
+    await userService.updateUserSession(user.id, {
+      ...userSession,
+      checkout_current_item: 0
+    });
+
+    const cart = await cartService.getActiveCart(user.id);
+    const cartItems = await cartService.getCartItemsCombined(cart.id);
+    
+    await showNextCheckoutItem(from, user, cartItems, 0);
+
+  } catch (error) {
+    console.error('❌ Error handling edit cart:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
   }
 }
 
