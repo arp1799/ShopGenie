@@ -156,6 +156,27 @@ async function initializeTables() {
       console.log('✅ Added product_name column to cart_items table');
     }
 
+    // Add product selection columns
+    if (!cartItemsColumnNames.includes('selected_product_name')) {
+      await client.query('ALTER TABLE cart_items ADD COLUMN selected_product_name TEXT');
+      console.log('✅ Added selected_product_name column to cart_items table');
+    }
+    
+    if (!cartItemsColumnNames.includes('selected_product_price')) {
+      await client.query('ALTER TABLE cart_items ADD COLUMN selected_product_price DECIMAL(10,2)');
+      console.log('✅ Added selected_product_price column to cart_items table');
+    }
+    
+    if (!cartItemsColumnNames.includes('selected_retailer')) {
+      await client.query('ALTER TABLE cart_items ADD COLUMN selected_retailer VARCHAR(50)');
+      console.log('✅ Added selected_retailer column to cart_items table');
+    }
+    
+    if (!cartItemsColumnNames.includes('selected_delivery_time')) {
+      await client.query('ALTER TABLE cart_items ADD COLUMN selected_delivery_time VARCHAR(50)');
+      console.log('✅ Added selected_delivery_time column to cart_items table');
+    }
+
     // Check carts table structure
     const cartsColumns = await client.query(`
       SELECT column_name 

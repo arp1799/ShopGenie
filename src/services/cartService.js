@@ -608,6 +608,42 @@ class CartService {
   }
 
   /**
+   * Update cart item with selected product details
+   * @param {number} cartId - Cart ID
+   * @param {string} itemName - Item name
+   * @param {Object} selectedProduct - Selected product details
+   * @returns {Promise<Object>} - Updated cart item
+   */
+  async updateCartItemWithProduct(cartId, itemName, selectedProduct) {
+    try {
+      const result = await query(
+        `UPDATE cart_items SET 
+          selected_product_name = $1,
+          selected_product_price = $2,
+          selected_retailer = $3,
+          selected_delivery_time = $4,
+          updated_at = NOW()
+        WHERE cart_id = $5 AND LOWER(product_name) = LOWER($6)
+        RETURNING *`,
+        [
+          selectedProduct.name,
+          selectedProduct.price,
+          selectedProduct.retailer,
+          selectedProduct.delivery_time,
+          cartId,
+          itemName
+        ]
+      );
+      
+      console.log(`✅ Updated cart item ${itemName} with selected product: ${selectedProduct.name}`);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Error updating cart item with product:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get mixed product suggestions from all retailers for a specific item
    * @param {string} itemName - Item name
    * @param {number} userId - User ID for authentication

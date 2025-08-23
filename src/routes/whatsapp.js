@@ -159,7 +159,8 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
 
-    if (lowerMessage === 'connected retailers' || lowerMessage === 'show connected' || lowerMessage === 'my retailers') {
+    if (lowerMessage === 'connected retailers' || lowerMessage === 'show connected' || lowerMessage === 'my retailers' || 
+        lowerMessage === 'my loginned apps' || lowerMessage === 'my logged in apps' || lowerMessage === 'logged in apps') {
       await handleShowConnectedRetailers(from, user);
       return;
     }
@@ -185,6 +186,34 @@ async function processMessage(from, message, messageSid, messageType) {
     // Resend OTP command
     if (lowerMessage === 'resend otp' || lowerMessage === 'resend') {
       await handleResendOTP(from, user);
+      return;
+    }
+
+    // Product selection commands (e.g., "1 for milk", "2 for bread")
+    const productSelectionPattern = /^(\d+)\s+for\s+(.+)$/i;
+    const productSelectionMatch = lowerMessage.match(productSelectionPattern);
+    if (productSelectionMatch) {
+      const selectionNumber = parseInt(productSelectionMatch[1]);
+      const itemName = productSelectionMatch[2].trim();
+      await handleProductSelection(from, user, { 
+        intent: 'product_selection', 
+        selectionNumber, 
+        itemName 
+      });
+      return;
+    }
+
+    // All selection commands (e.g., "all 1", "all 2")
+    const allSelectionPattern = /^all\s+(\d+)$/i;
+    const allSelectionMatch = lowerMessage.match(allSelectionPattern);
+    if (allSelectionMatch) {
+      const selectionNumber = parseInt(allSelectionMatch[1]);
+      await handleProductSelection(from, user, { 
+        intent: 'product_selection', 
+        selectionNumber, 
+        itemName: 'all',
+        selectAll: true
+      });
       return;
     }
 
@@ -1360,6 +1389,124 @@ async function handleLocationMessage(from, user, message, messageSid) {
       from,
       "😔 Sorry, I encountered an error processing your location. Please try typing your address manually."
     );
+  }
+}
+
+// Handle product selection from suggestions
+async function handleProductSelection(from, user, parsedIntent) {
+  try {
+    console.log(`🛒 [PRODUCT_SELECTION] Processing product selection for user ${user.id}`);
+    
+    const { selectionNumber, itemName, selectAll } = parsedIntent;
+    
+    if (!selectionNumber || selectionNumber < 1) {
+      await whatsappService.sendMessage(
+        from,
+        "❌ Invalid selection number. Please choose a number from the suggestions."
+      );
+      return;
+    }
+
+    // Get user's cart
+    const cart = await cartService.getActiveCart(user.id);
+    if (!cart) {
+      await whatsappService.sendMessage(
+        from,
+        "🛒 You don't have an active cart. Start by saying 'Order [items]'"
+      );
+      return;
+    }
+
+    // Get product suggestions for the cart
+    const productSuggestions = await cartService.getProductSuggestions(cart.id, user.id);
+    
+    if (selectAll) {
+      // Handle "all X" selection
+      await handleAllProductSelection(from, user, cart, productSuggestions, selectionNumber);
+    } else {
+      // Handle single item selection
+      await handleSingleProductSelection(from, user, cart, productSuggestions, itemName, selectionNumber);
+    }
+
+  } catch (error) {
+    console.error('❌ [PRODUCT_SELECTION] Error handling product selection:', error);
+    await whatsappService.sendMessage(
+      from,
+      "😔 Sorry, I encountered an error processing your selection. Please try again."
+    );
+  }
+}
+
+// Handle single product selection
+async function handleSingleProductSelection(from, user, cart, productSuggestions, itemName, selectionNumber) {
+  try {
+    const itemSuggestions = productSuggestions[itemName];
+    if (!itemSuggestions) {
+      await whatsappService.sendMessage(
+        from,
+        `❌ No suggestions found for "${itemName}". Please try again.`
+      );
+      return;
+    }
+
+    // Get mixed suggestions for this item
+    const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName, user.id);
+    
+    if (selectionNumber > mixedSuggestions.length) {
+      await whatsappService.sendMessage(
+        from,
+        `❌ Invalid selection. Only ${mixedSuggestions.length} options available for "${itemName}".`
+      );
+      return;
+    }
+
+    const selectedProduct = mixedSuggestions[selectionNumber - 1];
+    
+    // Update cart item with selected product details
+    await cartService.updateCartItemWithProduct(cart.id, itemName, selectedProduct);
+    
+    await whatsappService.sendMessage(
+      from,
+      `✅ Selected for ${itemName}:\n\n` +
+      `• ${selectedProduct.name}\n` +
+      `• Price: ₹${selectedProduct.price}\n` +
+      `• Retailer: ${selectedProduct.retailer}\n` +
+      `• Delivery: ${selectedProduct.delivery_time}\n\n` +
+      `Continue selecting other items or say 'Show cart' to view your selections.`
+    );
+
+  } catch (error) {
+    console.error('❌ Error handling single product selection:', error);
+    throw error;
+  }
+}
+
+// Handle all product selection
+async function handleAllProductSelection(from, user, cart, productSuggestions, selectionNumber) {
+  try {
+    const cartItems = await cartService.getCartItemsCombined(cart.id);
+    let selectedCount = 0;
+    
+    for (const item of cartItems) {
+      const itemName = item.product_name;
+      const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName, user.id);
+      
+      if (selectionNumber <= mixedSuggestions.length) {
+        const selectedProduct = mixedSuggestions[selectionNumber - 1];
+        await cartService.updateCartItemWithProduct(cart.id, itemName, selectedProduct);
+        selectedCount++;
+      }
+    }
+    
+    await whatsappService.sendMessage(
+      from,
+      `✅ Selected option ${selectionNumber} for ${selectedCount} items.\n\n` +
+      `Say 'Show cart' to view your selections or continue selecting individual items.`
+    );
+
+  } catch (error) {
+    console.error('❌ Error handling all product selection:', error);
+    throw error;
   }
 }
 
