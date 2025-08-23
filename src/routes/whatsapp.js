@@ -239,13 +239,20 @@ async function processMessage(from, message, messageSid, messageType) {
       return;
     }
 
-    // Retailer selection for checkout (e.g., "zepto for milk", "blinkit for bread")
+    // Retailer selection for checkout and order (e.g., "zepto for milk", "blinkit for bread")
     const retailerSelectionPattern = /^(\w+)\s+for\s+(.+)$/i;
     const retailerSelectionMatch = lowerMessage.match(retailerSelectionPattern);
     if (retailerSelectionMatch) {
       const retailer = retailerSelectionMatch[1].toLowerCase();
       const itemName = retailerSelectionMatch[2].trim();
-      await handleRetailerSelectionForCheckout(from, user, retailer, itemName);
+      
+      // Check if user is in order mode or checkout mode
+      const userSession = await userService.getUserSession(user.id);
+      if (userSession.order_mode) {
+        await handleRetailerSelectionForOrder(from, user, retailer, itemName);
+      } else {
+        await handleRetailerSelectionForCheckout(from, user, retailer, itemName);
+      }
       return;
     }
 
@@ -259,7 +266,7 @@ async function processMessage(from, message, messageSid, messageType) {
     }
 
     // Order mode commands
-    if (lowerMessage === 'add selected') {
+    if (lowerMessage === 'add to cart') {
       await handleAddSelectedToCart(from, user);
       return;
     }
@@ -267,6 +274,11 @@ async function processMessage(from, message, messageSid, messageType) {
     if (lowerMessage === 'cancel order') {
       await userService.updateUserSession(user.id, {});
       await whatsappService.sendMessage(from, "❌ Order cancelled. You can start over anytime.");
+      return;
+    }
+
+    if (lowerMessage === 'edit order') {
+      await handleEditOrder(from, user);
       return;
     }
 
@@ -1194,43 +1206,119 @@ async function showNextCheckoutItem(from, user, cartItems, currentIndex) {
 // Show order suggestions for selection
 async function showOrderSuggestions(from, user, items) {
   try {
-    let message = "🛒 *Product Suggestions:*\n\n";
-    
-    for (const item of items) {
-      const itemName = item.name;
-      message += `*${itemName}*\n`;
-      
-      // Get mixed suggestions from all retailers for this item
-      const mixedSuggestions = await cartService.getMixedProductSuggestions(itemName, user.id);
-      
-      if (mixedSuggestions.length > 0) {
-        message += "\n*Best Options (All Retailers):*\n";
-        
-        mixedSuggestions.forEach((product, index) => {
-          const priceDisplay = product.price === 'N/A' ? 'N/A' : `₹${product.price}`;
-          const deliveryDisplay = product.delivery_time === 'N/A' ? 'N/A' : product.delivery_time;
-          const stockStatus = product.in_stock ? '✅' : '❌ Out of Stock';
-          message += `${index + 1}. ${product.name} - ${priceDisplay} (${deliveryDisplay}) ${stockStatus}\n`;
-          message += `   📍 ${product.retailer}\n`;
-        });
-      } else {
-        message += "\n*No suggestions available*\n";
-      }
-      
-      message += "\n";
+    // Set order mode with items for step-by-step selection
+    await userService.updateUserSession(user.id, {
+      order_mode: true,
+      order_items: items,
+      order_current_item: 0,
+      order_cart_id: (await cartService.getActiveCart(user.id))?.id || (await cartService.createCart(user.id)).id
+    });
+
+    // Show first item for selection
+    await showNextOrderItem(from, user, items, 0);
+
+  } catch (error) {
+    console.error('❌ Error showing order suggestions:', error);
+    throw error;
+  }
+}
+
+// Show next item in order process
+async function showNextOrderItem(from, user, items, currentIndex) {
+  try {
+    if (currentIndex >= items.length) {
+      // All items processed, show final selection summary
+      await showOrderSummary(from, user);
+      return;
     }
 
-    message += "To select products, reply with:\n";
-    message += "• '1 for milk' - Select 1st option for milk\n";
-    message += "• '2 for bread' - Select 2nd option for bread\n";
-    message += "• 'All 1' - Select 1st option for all items\n";
-    message += "• 'Add selected' - Add selected items to cart\n";
-    message += "• 'Cancel order' - Cancel this order";
+    const currentItem = items[currentIndex];
+    const itemName = currentItem.name;
+    
+    // Get price comparison for this item
+    const priceComparison = await aiService.scrapePriceComparison(itemName, user.id);
+    
+    let message = `🛒 *Order - Item ${currentIndex + 1}/${items.length}*\n\n`;
+    message += `*${itemName}* (${currentItem.quantity} ${currentItem.unit})\n\n`;
+    
+    // Show available retailers and prices
+    const authService = require('../services/authService');
+    const userCredentials = await authService.getAllRetailerCredentials(user.id);
+    const authenticatedRetailers = userCredentials.map(cred => cred.retailer);
+    
+    let hasValidPrices = false;
+    for (const retailer of authenticatedRetailers) {
+      const retailerPrice = priceComparison.find(p => p.retailer.toLowerCase() === retailer);
+      if (retailerPrice && retailerPrice.price !== 'N/A') {
+        message += `• ${retailer.charAt(0).toUpperCase() + retailer.slice(1)}: ₹${retailerPrice.price} (${retailerPrice.delivery_time})\n`;
+        hasValidPrices = true;
+      }
+    }
+    
+    if (!hasValidPrices) {
+      message += `• No prices available for authenticated retailers\n`;
+    }
+    
+    message += `\n*Select retailer for this item:*\n`;
+    for (let i = 0; i < authenticatedRetailers.length; i++) {
+      const retailer = authenticatedRetailers[i];
+      message += `• '${retailer} for ${itemName}' - Select ${retailer.charAt(0).toUpperCase() + retailer.slice(1)}\n`;
+    }
+    
+    message += `\n*Or:*\n`;
+    message += `• 'skip ${itemName}' - Skip this item\n`;
+    message += `• 'cancel order' - Cancel order process`;
 
     await whatsappService.sendMessage(from, message);
 
   } catch (error) {
-    console.error('❌ Error showing order suggestions:', error);
+    console.error('❌ Error showing next order item:', error);
+    throw error;
+  }
+}
+
+// Show order summary before adding to cart
+async function showOrderSummary(from, user) {
+  try {
+    const userSession = await userService.getUserSession(user.id);
+    const selectedItems = userSession.selected_order_items || [];
+    
+    let message = `📋 *Order Summary*\n\n`;
+    
+    if (selectedItems.length === 0) {
+      message += `No items selected.\n\n`;
+      message += `*Actions:*\n`;
+      message += `• 'Add to cart' - Add selected items to cart\n`;
+      message += `• 'Cancel order' - Cancel this order`;
+    } else {
+      let totalAmount = 0;
+      
+      for (const item of selectedItems) {
+        if (item.selectedProduct) {
+          const itemTotal = item.selectedProduct.price * item.quantity;
+          totalAmount += itemTotal;
+          
+          message += `*${item.name}*\n`;
+          message += `• ${item.selectedProduct.name}\n`;
+          message += `• Retailer: ${item.selectedProduct.retailer}\n`;
+          message += `• Price: ₹${item.selectedProduct.price} × ${item.quantity} = ₹${itemTotal}\n`;
+          message += `• Delivery: ${item.selectedProduct.delivery_time}\n\n`;
+        } else {
+          message += `*${item.name}* - No retailer selected\n\n`;
+        }
+      }
+      
+      message += `*Total: ₹${totalAmount}*\n\n`;
+      message += `*Actions:*\n`;
+      message += `• 'Add to cart' - Add selected items to cart\n`;
+      message += `• 'Edit order' - Go back to item selection\n`;
+      message += `• 'Cancel order' - Cancel this order`;
+    }
+
+    await whatsappService.sendMessage(from, message);
+
+  } catch (error) {
+    console.error('❌ Error showing order summary:', error);
     throw error;
   }
 }
@@ -1765,6 +1853,83 @@ async function handleAllProductSelection(from, user, cart, productSuggestions, s
   }
 }
 
+// Handle retailer selection for order
+async function handleRetailerSelectionForOrder(from, user, retailer, itemName) {
+  try {
+    console.log(`🛒 [ORDER] User ${user.id} selected ${retailer} for ${itemName}`);
+    
+    const userSession = await userService.getUserSession(user.id);
+    if (!userSession.order_mode) {
+      await whatsappService.sendMessage(from, "❌ No active order session. Say 'order [items]' to start.");
+      return;
+    }
+
+    // Get price comparison for this item
+    const priceComparison = await aiService.scrapePriceComparison(itemName, user.id);
+    const retailerPrice = priceComparison.find(p => p.retailer.toLowerCase() === retailer);
+    
+    if (!retailerPrice || retailerPrice.price === 'N/A') {
+      await whatsappService.sendMessage(
+        from,
+        `❌ No price available for ${retailer} for ${itemName}. Please select another retailer.`
+      );
+      return;
+    }
+
+    // Store selected item in session
+    const orderItems = userSession.order_items || [];
+    const selectedItems = userSession.selected_order_items || [];
+    const currentItem = orderItems.find(item => item.name === itemName);
+    
+    if (currentItem) {
+      const selectedItem = {
+        ...currentItem,
+        selectedProduct: {
+          name: `${itemName} from ${retailer}`,
+          price: retailerPrice.price,
+          retailer: retailer,
+          delivery_time: retailerPrice.delivery_time
+        }
+      };
+      
+      // Update or add selected item
+      const existingIndex = selectedItems.findIndex(item => item.name === itemName);
+      if (existingIndex >= 0) {
+        selectedItems[existingIndex] = selectedItem;
+      } else {
+        selectedItems.push(selectedItem);
+      }
+      
+      await userService.updateUserSession(user.id, {
+        ...userSession,
+        selected_order_items: selectedItems
+      });
+    }
+    
+    await whatsappService.sendMessage(
+      from,
+      `✅ Selected ${retailer.charAt(0).toUpperCase() + retailer.slice(1)} for ${itemName}\n` +
+      `Price: ₹${retailerPrice.price}\n` +
+      `Delivery: ${retailerPrice.delivery_time}`
+    );
+
+    // Move to next item
+    const currentIndex = userSession.order_current_item || 0;
+    const nextIndex = currentIndex + 1;
+    
+    await userService.updateUserSession(user.id, {
+      ...userSession,
+      order_current_item: nextIndex
+    });
+
+    await showNextOrderItem(from, user, orderItems, nextIndex);
+
+  } catch (error) {
+    console.error('❌ Error handling retailer selection for order:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
 // Handle retailer selection for checkout
 async function handleRetailerSelectionForCheckout(from, user, retailer, itemName) {
   try {
@@ -1820,31 +1985,50 @@ async function handleRetailerSelectionForCheckout(from, user, retailer, itemName
 // Handle skip item
 async function handleSkipItem(from, user, itemName) {
   try {
-    console.log(`🛒 [CHECKOUT] User ${user.id} skipped ${itemName}`);
+    console.log(`🛒 [SKIP] User ${user.id} skipped ${itemName}`);
     
     const userSession = await userService.getUserSession(user.id);
-    if (!userSession.checkout_mode) {
-      await whatsappService.sendMessage(from, "❌ No active checkout session. Say 'checkout' to start.");
-      return;
-    }
-
-    await whatsappService.sendMessage(
-      from,
-      `⏭️ Skipped ${itemName}. Moving to next item...`
-    );
-
-    // Move to next item
-    const cart = await cartService.getActiveCart(user.id);
-    const cartItems = await cartService.getCartItemsCombined(cart.id);
-    const currentIndex = userSession.checkout_current_item || 0;
-    const nextIndex = currentIndex + 1;
     
-    await userService.updateUserSession(user.id, {
-      ...userSession,
-      checkout_current_item: nextIndex
-    });
+    if (userSession.checkout_mode) {
+      // Handle checkout mode skip
+      await whatsappService.sendMessage(
+        from,
+        `⏭️ Skipped ${itemName}. Moving to next item...`
+      );
 
-    await showNextCheckoutItem(from, user, cartItems, nextIndex);
+      const cart = await cartService.getActiveCart(user.id);
+      const cartItems = await cartService.getCartItemsCombined(cart.id);
+      const currentIndex = userSession.checkout_current_item || 0;
+      const nextIndex = currentIndex + 1;
+      
+      await userService.updateUserSession(user.id, {
+        ...userSession,
+        checkout_current_item: nextIndex
+      });
+
+      await showNextCheckoutItem(from, user, cartItems, nextIndex);
+      
+    } else if (userSession.order_mode) {
+      // Handle order mode skip
+      await whatsappService.sendMessage(
+        from,
+        `⏭️ Skipped ${itemName}. Moving to next item...`
+      );
+
+      const orderItems = userSession.order_items || [];
+      const currentIndex = userSession.order_current_item || 0;
+      const nextIndex = currentIndex + 1;
+      
+      await userService.updateUserSession(user.id, {
+        ...userSession,
+        order_current_item: nextIndex
+      });
+
+      await showNextOrderItem(from, user, orderItems, nextIndex);
+      
+    } else {
+      await whatsappService.sendMessage(from, "❌ No active session. Say 'order [items]' or 'checkout' to start.");
+    }
 
   } catch (error) {
     console.error('❌ Error handling skip item:', error);
@@ -1889,6 +2073,33 @@ async function handleConfirmOrder(from, user) {
 
   } catch (error) {
     console.error('❌ Error handling confirm order:', error);
+    await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
+  }
+}
+
+// Handle edit order
+async function handleEditOrder(from, user) {
+  try {
+    console.log(`🛒 [ORDER] User ${user.id} wants to edit order`);
+    
+    const userSession = await userService.getUserSession(user.id);
+    if (!userSession.order_mode) {
+      await whatsappService.sendMessage(from, "❌ No active order session. Say 'order [items]' to start.");
+      return;
+    }
+
+    // Reset to first item
+    await userService.updateUserSession(user.id, {
+      ...userSession,
+      order_current_item: 0
+    });
+
+    const orderItems = userSession.order_items || [];
+    
+    await showNextOrderItem(from, user, orderItems, 0);
+
+  } catch (error) {
+    console.error('❌ Error handling edit order:', error);
     await whatsappService.sendMessage(from, "😔 Sorry, I encountered an error. Please try again.");
   }
 }
