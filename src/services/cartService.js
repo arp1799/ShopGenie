@@ -679,6 +679,79 @@ class CartService {
   }
 
   /**
+   * Add item to cart with selected product details
+   * @param {number} cartId - Cart ID
+   * @param {Object} item - Item object
+   * @param {Object} selectedProduct - Selected product details
+   * @returns {Promise<Object>} - Added cart item object
+   */
+  async addItemToCartWithProduct(cartId, item, selectedProduct) {
+    try {
+      // Check if item already exists in cart
+      const existingItem = await query(
+        'SELECT * FROM cart_items WHERE cart_id = $1 AND LOWER(product_name) = LOWER($2) AND unit = $3',
+        [cartId, item.name, item.unit]
+      );
+
+      if (existingItem.rows.length > 0) {
+        // Update quantity of existing item
+        const existing = existingItem.rows[0];
+        const newQuantity = existing.quantity + item.quantity;
+        
+        const result = await query(
+          `UPDATE cart_items SET 
+            quantity = $1, 
+            query = $2,
+            selected_product_name = $3,
+            selected_product_price = $4,
+            selected_retailer = $5,
+            selected_delivery_time = $6
+          WHERE id = $7 RETURNING *`,
+          [
+            newQuantity,
+            `${newQuantity} ${item.unit} ${item.name}`,
+            selectedProduct.name,
+            selectedProduct.price,
+            selectedProduct.retailer,
+            selectedProduct.delivery_time,
+            existing.id
+          ]
+        );
+        
+        console.log(`✅ Updated quantity for ${item.name} in cart ${cartId}: ${newQuantity} ${item.unit}`);
+        return result.rows[0];
+      } else {
+        // Add new item with product details
+        const result = await query(
+          `INSERT INTO cart_items (
+            cart_id, product_name, normalized_name, quantity, unit, notes, query,
+            selected_product_name, selected_product_price, selected_retailer, selected_delivery_time
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+          [
+            cartId,
+            item.name, // product_name
+            item.name, // normalized_name
+            item.quantity,
+            item.unit,
+            item.notes || null,
+            `${item.quantity} ${item.unit} ${item.name}`, // query
+            selectedProduct.name,
+            selectedProduct.price,
+            selectedProduct.retailer,
+            selectedProduct.delivery_time
+          ]
+        );
+        
+        console.log(`✅ Added item to cart ${cartId}: ${item.name} with product ${selectedProduct.name}`);
+        return result.rows[0];
+      }
+    } catch (error) {
+      console.error('❌ Error adding item to cart with product:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get mixed product suggestions from all retailers for a specific item
    * @param {string} itemName - Item name
    * @param {number} userId - User ID for authentication
